@@ -1,4 +1,9 @@
 const axios = require("axios");
+const crypto = require("crypto");
+
+function sha1(str) {
+  return crypto.createHash("sha1").update(str).digest("hex");
+}
 
 class IikoClient {
   constructor(baseUrl, login, password) {
@@ -16,7 +21,6 @@ class IikoClient {
   normalizeToken(data) {
     if (!data) return null;
     if (typeof data === "string") return data.trim();
-
     if (typeof data === "object") {
       if (typeof data.key === "string") return data.key.trim();
       if (typeof data.token === "string") return data.token.trim();
@@ -24,22 +28,16 @@ class IikoClient {
       if (typeof data.session === "string") return data.session.trim();
       if (typeof data.value === "string") return data.value.trim();
     }
-
     return null;
   }
 
   async requestTokenFrom(url, options = {}) {
-    const res = await this.http.request({
-      url,
-      ...options,
-    });
-
+    const res = await this.http.request({ url, ...options });
     if (res.status >= 200 && res.status < 300) {
       const token = this.normalizeToken(res.data);
       if (token) return token;
       throw new Error(`Auth endpoint returned success but no token: ${url}`);
     }
-
     throw new Error(`Auth failed ${res.status} for ${url}`);
   }
 
@@ -49,33 +47,35 @@ class IikoClient {
       return this.token;
     }
 
+    // iiko requires SHA1 hash of the password
+    const passHash = sha1(this.password);
+
     const attempts = [
       () =>
         this.requestTokenFrom(`${this.baseUrl}/resto/api/auth`, {
           method: "get",
-          params: { login: this.login, pass: this.password },
+          params: { login: this.login, pass: passHash },
         }),
       () =>
         this.requestTokenFrom(`${this.baseUrl}/resto/api/auth`, {
           method: "get",
-          params: { login: this.login, password: this.password },
+          params: { login: this.login, password: passHash },
         }),
       () =>
         this.requestTokenFrom(`${this.baseUrl}/resto/api/auth`, {
           method: "post",
           headers: { "Content-Type": "application/json" },
-          data: { login: this.login, pass: this.password },
+          data: { login: this.login, pass: passHash },
         }),
       () =>
         this.requestTokenFrom(`${this.baseUrl}/resto/api/auth`, {
           method: "post",
           headers: { "Content-Type": "application/json" },
-          data: { login: this.login, password: this.password },
+          data: { login: this.login, password: passHash },
         }),
     ];
 
     const errors = [];
-
     for (const attempt of attempts) {
       try {
         const token = await attempt();
@@ -93,27 +93,22 @@ class IikoClient {
 
   async apiGet(path, params = {}, retry = true) {
     const key = await this.getToken();
-
     const res = await this.http.get(`${this.baseUrl}/resto/api/${path}`, {
       params: { key, ...params },
     });
-
     if (res.status >= 200 && res.status < 300) {
       return res.data;
     }
-
     if (res.status === 401 && retry) {
       this.token = null;
       this.tokenExpiry = null;
       return this.apiGet(path, params, false);
     }
-
     throw new Error(`GET /resto/api/${path} failed with status ${res.status}`);
   }
 
   async olapPost(body, retry = true) {
     const key = await this.getToken();
-
     const res = await this.http.post(
       `${this.baseUrl}/resto/api/v2/reports/olap`,
       body,
@@ -123,25 +118,20 @@ class IikoClient {
         timeout: 30000,
       }
     );
-
     if (res.status >= 200 && res.status < 300) {
       return res.data;
     }
-
     if (res.status === 401 && retry) {
       this.token = null;
       this.tokenExpiry = null;
       return this.olapPost(body, false);
     }
-
     throw new Error(`POST /resto/api/v2/reports/olap failed with status ${res.status}`);
   }
 
   parseOlap(data) {
     if (!data || !Array.isArray(data.data)) return [];
-
     const cols = Array.isArray(data.columnNames) ? data.columnNames : [];
-
     return data.data.map((row) => {
       const obj = {};
       cols.forEach((c, i) => {
