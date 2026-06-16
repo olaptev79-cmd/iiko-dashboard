@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend deps
+        working-directory: ./backend
+        run: npm install
+
+      - name: Check JS syntax (server.js)
+        working-directory: ./backend
+        run: node --check server.js
+
+      - name: Check JS syntax (iikoClient.js)
+        working-directory: ./backend
+        run: node --check iikoClient.js
+
+      - name: Check JS syntax (dashboardService.js)
+        working-directory: ./backend
+        run: node --check dashboardService.js
+
+      - name: Validate docker-compose.yml
+        run: |
+          docker compose config --quiet
+
+      - name: Check frontend HTML exists
+        run: test -f frontend/index.html && echo 'frontend/index.html OK'
+
+      - name: Check backend Dockerfile exists
+        run: test -f backend/Dockerfile && echo 'backend/Dockerfile OK'
+
+      - name: Check frontend Dockerfile exists
+        run: test -f frontend/Dockerfile && echo 'frontend/Dockerfile OK'
