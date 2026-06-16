@@ -16,12 +16,15 @@ class IikoClient {
   normalizeToken(data) {
     if (!data) return null;
     if (typeof data === "string") return data.trim();
+
     if (typeof data === "object") {
       if (typeof data.key === "string") return data.key.trim();
       if (typeof data.token === "string") return data.token.trim();
       if (typeof data.authToken === "string") return data.authToken.trim();
       if (typeof data.session === "string") return data.session.trim();
+      if (typeof data.value === "string") return data.value.trim();
     }
+
     return null;
   }
 
@@ -90,6 +93,7 @@ class IikoClient {
 
   async apiGet(path, params = {}, retry = true) {
     const key = await this.getToken();
+
     const res = await this.http.get(`${this.baseUrl}/resto/api/${path}`, {
       params: { key, ...params },
     });
@@ -109,6 +113,7 @@ class IikoClient {
 
   async olapPost(body, retry = true) {
     const key = await this.getToken();
+
     const res = await this.http.post(
       `${this.baseUrl}/resto/api/v2/reports/olap`,
       body,
@@ -134,7 +139,9 @@ class IikoClient {
 
   parseOlap(data) {
     if (!data || !Array.isArray(data.data)) return [];
+
     const cols = Array.isArray(data.columnNames) ? data.columnNames : [];
+
     return data.data.map((row) => {
       const obj = {};
       cols.forEach((c, i) => {
