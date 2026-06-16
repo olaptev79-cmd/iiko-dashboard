@@ -126,7 +126,28 @@ class IikoClient {
       this.tokenExpiry = null;
       return this.olapPost(body, false);
     }
-    throw new Error(`POST /resto/api/v2/reports/olap failed with status ${res.status}`);
+    const details = this.describeError(res.data);
+    console.error(
+      `[iiko] OLAP request failed (${res.status}). Request body: ${JSON.stringify(body)}. Response: ${details}`
+    );
+    throw new Error(
+      `POST /resto/api/v2/reports/olap failed with status ${res.status}: ${details}`
+    );
+  }
+
+  describeError(data) {
+    if (data == null) return "<empty body>";
+    if (typeof data === "string") return data;
+    if (typeof data === "object") {
+      if (typeof data.message === "string") return data.message;
+      if (typeof data.error === "string") return data.error;
+      try {
+        return JSON.stringify(data);
+      } catch (e) {
+        return String(data);
+      }
+    }
+    return String(data);
   }
 
   parseOlap(data) {
@@ -153,19 +174,35 @@ class IikoClient {
     return this.apiGet("employees");
   }
 
+  // iiko v2 OLAP requires dates as "yyyy-MM-dd" or "yyyy-MM-ddTHH:mm:ss.000".
+  // A space-separated "yyyy-MM-dd HH:mm:ss" value is rejected with HTTP 400.
+  normalizeOlapDate(value) {
+    if (!value) return value;
+    const str = String(value).trim();
+    const match = str.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
+    if (match) return `${match[1]}T${match[2]}.000`;
+    return str.slice(0, 10);
+  }
+
+  dateRangeFilter(from, to) {
+    return {
+      filterType: "DateRange",
+      periodType: "CUSTOM",
+      from: this.normalizeOlapDate(from),
+      to: this.normalizeOlapDate(to),
+      includeLow: true,
+      includeHigh: true,
+    };
+  }
+
   async getOlapSales(from, to) {
     return this.olapPost({
       reportType: "SALES",
       buildSummary: true,
-      groupByRowFields: ["OpenDate.Typed", "Department.Id", "Department.Name"],
+      groupByRowFields: ["OpenDate.Typed", "Department.Id", "Department"],
       aggregateFields: ["DishAmountInt", "DishSumInt"],
       filters: {
-        "OpenDate.Typed": {
-          filterType: "DateRange",
-          periodType: "CUSTOM",
-          from,
-          to,
-        },
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
       },
     });
   }
@@ -174,15 +211,10 @@ class IikoClient {
     return this.olapPost({
       reportType: "SALES",
       buildSummary: true,
-      groupByRowFields: ["Dish.Name", "Dish.Category"],
+      groupByRowFields: ["DishName", "DishGroup"],
       aggregateFields: ["DishAmountInt", "DishSumInt"],
       filters: {
-        "OpenDate.Typed": {
-          filterType: "DateRange",
-          periodType: "CUSTOM",
-          from,
-          to,
-        },
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
       },
     });
   }
