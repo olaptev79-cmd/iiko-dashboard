@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>iiko Дашборд</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#0f1117;--card:#1a1d27;--accent:#e74c3c;--text:#e2e8f0;--muted:#64748b;--border:#2d3148;--green:#22c55e;--yellow:#f59e0b;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;}
+header{background:var(--card);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;}
+header h1{font-size:20px;font-weight:700;color:var(--accent);}header h1 span{color:var(--text);}
+.status-dot{width:10px;height:10px;border-radius:50%;background:var(--muted);display:inline-block;margin-right:6px;}
+.status-dot.online{background:var(--green);box-shadow:0 0 6px var(--green);}
+.container{max-width:1400px;margin:0 auto;padding:24px;}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px;}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;}
+.kpi .label{font-size:13px;color:var(--muted);margin-bottom:8px;}
+.kpi .value{font-size:28px;font-weight:700;}
+.kpi .sub{font-size:12px;color:var(--muted);margin-top:4px;}
+.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;}
+.card h2{font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);}
+.period-btns{display:flex;gap:8px;margin-bottom:16px;}
+.period-btn{background:var(--border);border:none;color:var(--muted);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;}
+.period-btn.active{background:var(--accent);color:#fff;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:500;}
+td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);}
+tr:hover td{background:rgba(255,255,255,0.03);}
+.loading{text-align:center;color:var(--muted);padding:40px;font-size:14px;}
+.error{color:var(--accent);font-size:13px;padding:8px;}
+@media(max-width:768px){.charts-grid{grid-template-columns:1fr;}.kpi-grid{grid-template-columns:repeat(2,1fr);}}
+</style>
+</head>
+<body>
+<header>
+  <h1>♥ iiko <span>Дашборд</span></h1>
+  <div id="serverStatus" style="font-size:13px;color:var(--muted);"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+</header>
+<div class="container">
+  <div class="kpi-grid">
+    <div class="kpi"><div class="label">Выручка сегодня</div><div class="value" id="kpiRevenue">—</div><div class="sub">рублей</div></div>
+    <div class="kpi"><div class="label">Заказы</div><div class="value" id="kpiOrders">—</div><div class="sub">штук</div></div>
+    <div class="kpi"><div class="label">Средний чек</div><div class="value" id="kpiAvg">—</div><div class="sub">рублей</div></div>
+    <div class="kpi"><div class="label">Отделения</div><div class="value" id="kpiDepts">—</div><div class="sub">активных</div></div>
+  </div>
+  <div class="charts-grid">
+    <div class="card">
+      <h2>Выручка по дням</h2>
+      <div class="period-btns">
+        <button class="period-btn active" onclick="loadChart(7,this)">7 дней</button>
+        <button class="period-btn" onclick="loadChart(14,this)">14 дней</button>
+        <button class="period-btn" onclick="loadChart(30,this)">30 дней</button>
+      </div>
+      <canvas id="chartRevenue" height="200"></canvas>
+    </div>
+    <div class="card">
+      <h2>По отделениям</h2>
+      <canvas id="chartDepts" height="220"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Топ-20 блюд</h2>
+    <div class="period-btns">
+      <button class="period-btn active" onclick="loadDishes(7,this)">7 дней</button>
+      <button class="period-btn" onclick="loadDishes(30,this)">30 дней</button>
+    </div>
+    <div id="dishesTable"><div class="loading">Загрузка...</div></div>
+  </div>
+</div>
+<script>
+const API = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+let chartRev = null, chartDept = null;
+
+async function api(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+function fmt(n) { return Number(n).toLocaleString('ru-RU', {maximumFractionDigits:0}); }
+
+async function loadStatus() {
+  try {
+    const d = await api('/api/health');
+    document.getElementById('dot').className = 'status-dot ' + (d.status === 'online' ? 'online' : '');
+    document.getElementById('statusText').textContent = d.status === 'online' ? 'Онлайн — ' + d.url : 'Оффлайн';
+  } catch { document.getElementById('statusText').textContent = 'Ошибка соединения'; }
+}
+
+async function loadSummary() {
+  try {
+    const d = await api('/api/dashboard');
+    document.getElementById('kpiRevenue').textContent = fmt(d.revenue);
+    document.getElementById('kpiOrders').textContent = fmt(d.orders);
+    document.getElementById('kpiAvg').textContent = fmt(d.avgCheck);
+    document.getElementById('kpiDepts').textContent = d.departmentsCount || 0;
+    if (d.byDepartment && d.byDepartment.length) renderDeptChart(d.byDepartment);
+  } catch(e) { console.error(e); }
+}
+
+async function loadChart(days, btn) {
+  document.querySelectorAll('.period-btns .period-btn').forEach(b => b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  try {
+    const d = await api('/api/chart?days=' + days);
+    const ctx = document.getElementById('chartRevenue').getContext('2d');
+    if (chartRev) chartRev.destroy();
+    chartRev = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: d.labels,
+        datasets: [{ label: 'Выручка', data: d.revenue, backgroundColor: 'rgba(231,76,60,0.7)', borderRadius: 6 }]
+      },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#64748b' }, grid: { display: false } }, y: { ticks: { color: '#64748b' }, grid: { color: '#2d3148' } } } }
+    });
+  } catch(e) { console.error(e); }
+}
+
+function renderDeptChart(data) {
+  const ctx = document.getElementById('chartDepts').getContext('2d');
+  if (chartDept) chartDept.destroy();
+  chartDept = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: data.map(d => d.name),
+      datasets: [{ data: data.map(d => d.revenue), backgroundColor: ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#34495e'] }]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#e2e8f0', font: { size: 11 } } } } }
+  });
+}
+
+async function loadDishes(days, btn) {
+  document.querySelectorAll('.card:last-child .period-btn').forEach(b => b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  const el = document.getElementById('dishesTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/top-dishes?days=' + days);
+    if (!d.dishes.length) { el.innerHTML = '<div class="loading">Нет данных</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Категория</th><th>Кол-во</th><th>Сумма, ₽</th></tr></thead><tbody>' +
+      d.dishes.map((r,i) => `<tr><td>${i+1}</td><td>${r.name}</td><td>${r.category||'—'}</td><td>${fmt(r.amount)}</td><td>${fmt(r.revenue)}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch(e) { el.innerHTML = '<div class="error">Ошибка: ' + e.message + '</div>'; }
+}
+
+loadStatus();
+loadSummary();
+loadChart(7);
+loadDishes(7);
+setInterval(loadStatus, 30000);
+setInterval(loadSummary, 60000);
+</script>
+</body>
+</html>
