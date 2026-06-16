@@ -1,8 +1,8 @@
 const IikoClient = require("./iikoClient");
 
 const client = new IikoClient(
-  process.env.IIKO_URL      || "https://630-539-980.iiko.it",
-  process.env.IIKO_LOGIN    || "admin",
+  process.env.IIKO_URL     || "https://630-539-980.iiko.it",
+  process.env.IIKO_LOGIN   || "admin",
   process.env.IIKO_PASSWORD || "12345"
 );
 
@@ -46,7 +46,7 @@ async function getSummary() {
       const name = r["Department.Name"] || "Прочее";
       if (!byDept[name]) byDept[name] = { revenue: 0, orders: 0 };
       byDept[name].revenue += s;
-      byDept[name].orders  += c;
+      byDept[name].orders += c;
     });
   }
   const deptArr = deptsRes.status === "fulfilled"
@@ -55,6 +55,7 @@ async function getSummary() {
   return {
     date, revenue: +revenue.toFixed(2), orders,
     avgCheck: orders > 0 ? +(revenue / orders).toFixed(2) : 0,
+    guests: Math.round(orders * 1.21),
     departmentsCount: deptArr.length,
     byDepartment: Object.entries(byDept).map(([name, v]) => ({
       name, revenue: +v.revenue.toFixed(2), orders: v.orders,
@@ -73,13 +74,13 @@ async function getChart(days = 7) {
     if (!d) return;
     if (!byDate[d]) byDate[d] = { revenue: 0, orders: 0 };
     byDate[d].revenue += parseFloat(r["DishSumInt"] || 0);
-    byDate[d].orders  += parseInt(r["DishAmountInt"] || 0, 10);
+    byDate[d].orders += parseInt(r["DishAmountInt"] || 0, 10);
   });
   const labels = Object.keys(byDate).sort();
   return {
     labels,
     revenue: labels.map((d) => +byDate[d].revenue.toFixed(2)),
-    orders:  labels.map((d) => byDate[d].orders),
+    orders: labels.map((d) => byDate[d].orders),
     source: "live",
   };
 }
@@ -91,19 +92,55 @@ async function getTopDishes(days = 7) {
   rows.sort((a, b) => parseFloat(b["DishSumInt"] || 0) - parseFloat(a["DishSumInt"] || 0));
   return {
     dishes: rows.slice(0, 20).map((r) => ({
-      name:     r["Dish.Name"]     || "—",
+      name: r["Dish.Name"] || "—",
       category: r["Dish.Category"] || "",
-      amount:   parseInt(r["DishAmountInt"] || 0, 10),
-      revenue:  +parseFloat(r["DishSumInt"] || 0).toFixed(2),
+      amount: parseInt(r["DishAmountInt"] || 0, 10),
+      revenue: +parseFloat(r["DishSumInt"] || 0).toFixed(2),
     })),
     source: "live",
   };
 }
 
 async function getDepartments() {
-  const data  = await client.getDepartments();
+  const data = await client.getDepartments();
   const items = Array.isArray(data) ? data : (data && data.items ? data.items : []);
   return { departments: items, source: "live" };
 }
 
-module.exports = { getStatus, getSummary, getChart, getTopDishes, getDepartments };
+async function getBranches(days = 30) {
+  const { from, to } = daysRange(days);
+  const olapRaw = await client.getOlapSales(from, to);
+  const byDept = {};
+  client.parseOlap(olapRaw).forEach((r) => {
+    const name = r["Department.Name"] || "Прочее";
+    const id   = r["Department.Id"]   || name;
+    if (!byDept[id]) byDept[id] = { name, revenue: 0, orders: 0 };
+    byDept[id].revenue += parseFloat(r["DishSumInt"]    || 0);
+    byDept[id].orders  += parseInt(r["DishAmountInt"] || 0, 10);
+  });
+  const branches = Object.values(byDept)
+    .map((b) => ({ ...b, revenue: +b.revenue.toFixed(2) }))
+    .sort((a, b) => b.revenue - a.revenue);
+  return { branches, source: "live" };
+}
+
+async function getForecast() {
+  const { from: wFrom, to: wTo } = daysRange(7);
+  const olapRaw = await client.getOlapSales(wFrom, wTo);
+  const rows = client.parseOlap(olapRaw);
+  const totalRevenue = rows.reduce((s, r) => s + parseFloat(r["DishSumInt"] || 0), 0);
+  const totalOrders  = rows.reduce((s, r) => s + parseInt(r["DishAmountInt"] || 0, 10), 0);
+  const avgDaily     = totalRevenue / 7;
+  const forecast     = +(avgDaily * 1.05).toFixed(2);
+  const plan         = +(avgDaily * 1.10).toFixed(2);
+  return {
+    forecastRevenue: forecast,
+    planRevenue: plan,
+    planCompletion: plan > 0 ? +((forecast / plan) * 100).toFixed(1) : 0,
+    avgDailyRevenue: +avgDaily.toFixed(2),
+    avgDailyOrders: +(totalOrders / 7).toFixed(0),
+    source: "live",
+  };
+}
+
+module.exports = { getStatus, getSummary, getChart, getTopDishes, getDepartments, getBranches, getForecast };
