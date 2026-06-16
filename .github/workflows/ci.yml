@@ -33,9 +33,11 @@ jobs:
         working-directory: ./backend
         run: node --check dashboardService.js
 
+      - name: Create stub .env for docker-compose validation
+        run: cp .env.example .env
+
       - name: Validate docker-compose.yml
-        run: |
-          docker compose config --quiet
+        run: docker compose config --quiet
 
       - name: Check frontend HTML exists
         run: test -f frontend/index.html && echo 'frontend/index.html OK'
