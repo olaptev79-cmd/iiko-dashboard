@@ -24,6 +24,8 @@ app.get("/api/dashboard",   wrap(() => svc.getSummary()));
 app.get("/api/chart",       wrap((r) => svc.getChart(Number(r.query.days) || 7)));
 app.get("/api/top-dishes",  wrap((r) => svc.getTopDishes(Number(r.query.days) || 7)));
 app.get("/api/departments", wrap(() => svc.getDepartments()));
+app.get("/api/branches",    wrap((r) => svc.getBranches(Number(r.query.days) || 30)));
+app.get("/api/forecast",    wrap(() => svc.getForecast()));
 
 app.listen(PORT, () =>
   console.log(`iiko-dashboard backend запущен на порту ${PORT}`)
