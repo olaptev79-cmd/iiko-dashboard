@@ -38,7 +38,7 @@ async function getSummary(client) {
       const c = parseInt(r["DishAmountInt"] || 0, 10);
       revenue += s;
       orders += c;
-      const name = r["Department.Name"] || "Прочее";
+      const name = r["Department"] || "Прочее";
       if (!byDept[name]) byDept[name] = { revenue: 0, orders: 0 };
       byDept[name].revenue += s;
       byDept[name].orders += c;
@@ -98,8 +98,8 @@ async function getTopDishes(client, days = 7) {
   rows.sort((a, b) => parseFloat(b["DishSumInt"] || 0) - parseFloat(a["DishSumInt"] || 0));
   return {
     dishes: rows.slice(0, 20).map((r) => ({
-      name: r["Dish.Name"] || "—",
-      category: r["Dish.Category"] || "",
+      name: r["DishName"] || "—",
+      category: r["DishGroup"] || "",
       amount: parseInt(r["DishAmountInt"] || 0, 10),
       revenue: +parseFloat(r["DishSumInt"] || 0).toFixed(2),
     })),
@@ -118,7 +118,7 @@ async function getBranches(client, days = 30) {
   const olapRaw = await client.getOlapSales(from, to);
   const byDept = {};
   client.parseOlap(olapRaw).forEach((r) => {
-    const name = r["Department.Name"] || "Прочее";
+    const name = r["Department"] || "Прочее";
     const id = r["Department.Id"] || name;
     if (!byDept[id]) byDept[id] = { name, revenue: 0, orders: 0 };
     byDept[id].revenue += parseFloat(r["DishSumInt"] || 0);
