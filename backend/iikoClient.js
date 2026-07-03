@@ -96,13 +96,25 @@ class IikoClient {
       dns
         .lookup(hostname, { all: true, verbatim: true })
         .then((records) => {
-          const bad = records.find((r) => isDisallowedIp(r.address));
-          if (bad || !records.length) {
+          const safe = records.filter((r) => !isDisallowedIp(r.address));
+          if (!safe.length) {
             callback(new Error("Запрос к внутреннему/запрещённому адресу заблокирован"));
             return;
           }
-          const pick = records[0];
-          callback(null, pick.address, pick.family);
+          // Node's http/https Agent calls this `lookup` option with
+          // `options.all: true` for Happy Eyeballs (dual-stack) connection
+          // attempts (default since Node 20). In that mode it expects the
+          // callback as `(err, addresses[])` — an ARRAY of {address,family}
+          // — not the classic single-address `(err, address, family)` form.
+          // Always using the single-address form breaks every request with
+          // a cryptic "Invalid IP address: undefined" once Node passes
+          // `all: true`, which is exactly the case that matters here.
+          if (options && options.all) {
+            callback(null, safe);
+          } else {
+            const pick = safe[0];
+            callback(null, pick.address, pick.family);
+          }
         })
         .catch((e) => callback(e));
     };
