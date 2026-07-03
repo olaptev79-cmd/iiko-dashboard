@@ -1,13 +1,5 @@
-const IikoClient = require("./iikoClient");
-
-const client = new IikoClient(
-  process.env.IIKO_URL     || "https://630-539-980.iiko.it",
-  process.env.IIKO_LOGIN   || "admin",
-  process.env.IIKO_PASSWORD || "12345"
-);
-
 const pad = (n) => String(n).padStart(2, "0");
-const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 function todayRange() {
   const d = fmt(new Date());
@@ -15,57 +7,71 @@ function todayRange() {
 }
 
 function daysRange(n) {
-  const now = new Date(), from = new Date(now);
+  const now = new Date(),
+    from = new Date(now);
   from.setDate(from.getDate() - n + 1);
   return { from: fmt(from) + " 00:00:00", to: fmt(now) + " 23:59:59" };
 }
 
-async function getStatus() {
+async function getStatus(client, meta) {
   const alive = await client.ping();
   return {
     status: alive ? "online" : "offline",
-    url: process.env.IIKO_URL || "https://630-539-980.iiko.it",
-    login: process.env.IIKO_LOGIN || "admin",
+    url: meta.url,
+    login: meta.login,
     timestamp: new Date().toISOString(),
   };
 }
 
-async function getSummary() {
+async function getSummary(client) {
   const { from, to, date } = todayRange();
   const [olapRes, deptsRes] = await Promise.allSettled([
     client.getOlapSales(from, to),
     client.getDepartments(),
   ]);
-  let revenue = 0, orders = 0;
+  let revenue = 0,
+    orders = 0;
   const byDept = {};
   if (olapRes.status === "fulfilled" && olapRes.value) {
     client.parseOlap(olapRes.value).forEach((r) => {
       const s = parseFloat(r["DishSumInt"] || 0);
       const c = parseInt(r["DishAmountInt"] || 0, 10);
-      revenue += s; orders += c;
+      revenue += s;
+      orders += c;
       const name = r["Department.Name"] || "Прочее";
       if (!byDept[name]) byDept[name] = { revenue: 0, orders: 0 };
       byDept[name].revenue += s;
       byDept[name].orders += c;
     });
   }
-  const deptArr = deptsRes.status === "fulfilled"
-    ? (Array.isArray(deptsRes.value) ? deptsRes.value : (deptsRes.value && deptsRes.value.items ? deptsRes.value.items : []))
-    : [];
+  const deptArr =
+    deptsRes.status === "fulfilled"
+      ? Array.isArray(deptsRes.value)
+        ? deptsRes.value
+        : deptsRes.value && deptsRes.value.items
+        ? deptsRes.value.items
+        : []
+      : [];
   return {
-    date, revenue: +revenue.toFixed(2), orders,
+    date,
+    revenue: +revenue.toFixed(2),
+    orders,
     avgCheck: orders > 0 ? +(revenue / orders).toFixed(2) : 0,
     guests: Math.round(orders * 1.21),
     departmentsCount: deptArr.length,
-    byDepartment: Object.entries(byDept).map(([name, v]) => ({
-      name, revenue: +v.revenue.toFixed(2), orders: v.orders,
-    })).sort((a, b) => b.revenue - a.revenue),
+    byDepartment: Object.entries(byDept)
+      .map(([name, v]) => ({
+        name,
+        revenue: +v.revenue.toFixed(2),
+        orders: v.orders,
+      }))
+      .sort((a, b) => b.revenue - a.revenue),
     source: olapRes.status === "fulfilled" ? "live" : "error",
     error: olapRes.status === "rejected" ? olapRes.reason.message : undefined,
   };
 }
 
-async function getChart(days = 7) {
+async function getChart(client, days = 7) {
   const { from, to } = daysRange(days);
   const olapRaw = await client.getOlapSales(from, to);
   const byDate = {};
@@ -85,7 +91,7 @@ async function getChart(days = 7) {
   };
 }
 
-async function getTopDishes(days = 7) {
+async function getTopDishes(client, days = 7) {
   const { from, to } = daysRange(days);
   const olapRaw = await client.getOlapTopDishes(from, to);
   const rows = client.parseOlap(olapRaw);
@@ -101,22 +107,22 @@ async function getTopDishes(days = 7) {
   };
 }
 
-async function getDepartments() {
+async function getDepartments(client) {
   const data = await client.getDepartments();
-  const items = Array.isArray(data) ? data : (data && data.items ? data.items : []);
+  const items = Array.isArray(data) ? data : data && data.items ? data.items : [];
   return { departments: items, source: "live" };
 }
 
-async function getBranches(days = 30) {
+async function getBranches(client, days = 30) {
   const { from, to } = daysRange(days);
   const olapRaw = await client.getOlapSales(from, to);
   const byDept = {};
   client.parseOlap(olapRaw).forEach((r) => {
     const name = r["Department.Name"] || "Прочее";
-    const id   = r["Department.Id"]   || name;
+    const id = r["Department.Id"] || name;
     if (!byDept[id]) byDept[id] = { name, revenue: 0, orders: 0 };
-    byDept[id].revenue += parseFloat(r["DishSumInt"]    || 0);
-    byDept[id].orders  += parseInt(r["DishAmountInt"] || 0, 10);
+    byDept[id].revenue += parseFloat(r["DishSumInt"] || 0);
+    byDept[id].orders += parseInt(r["DishAmountInt"] || 0, 10);
   });
   const branches = Object.values(byDept)
     .map((b) => ({ ...b, revenue: +b.revenue.toFixed(2) }))
@@ -124,15 +130,15 @@ async function getBranches(days = 30) {
   return { branches, source: "live" };
 }
 
-async function getForecast() {
+async function getForecast(client) {
   const { from: wFrom, to: wTo } = daysRange(7);
   const olapRaw = await client.getOlapSales(wFrom, wTo);
   const rows = client.parseOlap(olapRaw);
   const totalRevenue = rows.reduce((s, r) => s + parseFloat(r["DishSumInt"] || 0), 0);
-  const totalOrders  = rows.reduce((s, r) => s + parseInt(r["DishAmountInt"] || 0, 10), 0);
-  const avgDaily     = totalRevenue / 7;
-  const forecast     = +(avgDaily * 1.05).toFixed(2);
-  const plan         = +(avgDaily * 1.10).toFixed(2);
+  const totalOrders = rows.reduce((s, r) => s + parseInt(r["DishAmountInt"] || 0, 10), 0);
+  const avgDaily = totalRevenue / 7;
+  const forecast = +(avgDaily * 1.05).toFixed(2);
+  const plan = +(avgDaily * 1.1).toFixed(2);
   return {
     forecastRevenue: forecast,
     planRevenue: plan,
@@ -143,4 +149,12 @@ async function getForecast() {
   };
 }
 
-module.exports = { getStatus, getSummary, getChart, getTopDishes, getDepartments, getBranches, getForecast };
+module.exports = {
+  getStatus,
+  getSummary,
+  getChart,
+  getTopDishes,
+  getDepartments,
+  getBranches,
+  getForecast,
+};

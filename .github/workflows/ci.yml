@@ -33,6 +33,10 @@ jobs:
         working-directory: ./backend
         run: node --check dashboardService.js
 
+      - name: Check JS syntax (sessionStore.js)
+        working-directory: ./backend
+        run: node --check sessionStore.js
+
       - name: Create stub .env for docker-compose validation
         run: cp .env.example .env
 

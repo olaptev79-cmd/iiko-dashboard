@@ -5,9 +5,17 @@ function sha1(str) {
   return crypto.createHash("sha1").update(str).digest("hex");
 }
 
+function normalizeUrl(raw) {
+  let url = String(raw || "").trim().replace(/\/$/, "");
+  if (url && !/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+  return url;
+}
+
 class IikoClient {
   constructor(baseUrl, login, password) {
-    this.baseUrl = String(baseUrl || "").replace(/\/$/, "");
+    this.baseUrl = normalizeUrl(baseUrl);
     this.login = login;
     this.password = password;
     this.token = null;
@@ -195,6 +203,12 @@ class IikoClient {
       console.error("[iiko] ping failed:", e.message);
       return false;
     }
+  }
+
+  /** Validates credentials without throwing — used at login time. */
+  async verify() {
+    await this.getToken();
+    return true;
   }
 }
 
