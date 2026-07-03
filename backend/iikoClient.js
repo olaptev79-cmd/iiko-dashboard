@@ -128,15 +128,10 @@ class IikoClient {
     );
     if (res.status >= 200 && res.status < 300) {
       const rows = res.data && Array.isArray(res.data.data) ? res.data.data.length : "n/a";
-      const topKeys = res.data && typeof res.data === "object" ? Object.keys(res.data) : [];
       console.log(
         "[iiko] OLAP ok. Rows:", rows,
-        "| Filters:", JSON.stringify(body.filters),
-        "| ResponseKeys:", JSON.stringify(topKeys)
+        "| Filters:", JSON.stringify(body.filters)
       );
-      if (rows === 1 || (Array.isArray(res.data && res.data.data) && res.data.data.length > 0)) {
-        console.log("[iiko] Sample response (first 2000 chars):", JSON.stringify(res.data).slice(0, 2000));
-      }
       return res.data;
     }
     if (res.status === 401 && retry) {
@@ -168,13 +163,16 @@ class IikoClient {
     return String(data);
   }
 
+  // iiko v2 OLAP already returns `data` as an array of ready-made row
+  // objects keyed by field name (e.g. { Department, DishSumInt, ... }) -
+  // there is no separate columnNames array to zip against, unlike the
+  // legacy tabular OLAP v1 format this code was originally written for.
   parseOlap(data) {
     if (!data || !Array.isArray(data.data)) return [];
-    const cols = Array.isArray(data.columnNames) ? data.columnNames : [];
     return data.data.map((row) => {
       const obj = {};
-      cols.forEach((c, i) => {
-        obj[c] = row[i];
+      Object.keys(row || {}).forEach((c) => {
+        obj[c] = row[c];
       });
       return obj;
     });
