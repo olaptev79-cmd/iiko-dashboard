@@ -3,80 +3,12 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>Aqba Dashboard — iiko RMS</title>
+<title>Обзор — Aqba Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-:root{
-  --bg:#171614; --surface:#1c1b19; --surface-alt:#201f1d; --border:#393836;
-  --text:#cdccca; --muted:#797876; --faint:#5a5957;
-  --accent:#4f98a3; --accent-hover:#227f8b;
-  --error:#d163a7; --warning:#bb653b; --success:#6daa45;
-}
-*{margin:0;padding:0;box-sizing:border-box;}
-body{background:var(--bg);color:var(--text);font-family:'Inter',-apple-system,'Segoe UI',sans-serif;font-variant-numeric:tabular-nums lining-nums;}
-.hidden{display:none !important;}
-
-/* ---------- Login screen ---------- */
-#loginScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
-.login-card{width:100%;max-width:400px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px 32px;}
-.login-brand{text-align:center;margin-bottom:28px;}
-.login-brand .logo{font-size:22px;font-weight:800;letter-spacing:-0.02em;}
-.login-brand .logo span{color:var(--accent);}
-.login-brand .tagline{font-size:13px;color:var(--muted);margin-top:6px;}
-.field{margin-bottom:16px;}
-.field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:500;}
-.field input{width:100%;background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text);font-size:14px;font-family:inherit;transition:border-color .15s;}
-.field input:focus{outline:none;border-color:var(--accent);}
-.field input::placeholder{color:var(--faint);}
-.field-hint{font-size:12px;color:var(--faint);margin-top:6px;}
-.btn-primary{width:100%;background:var(--accent);color:#0f1413;border:none;border-radius:8px;padding:12px 14px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .15s;margin-top:6px;}
-.btn-primary:hover{background:var(--accent-hover);color:#fff;}
-.btn-primary:disabled{opacity:.6;cursor:not-allowed;}
-.login-error{background:rgba(209,99,167,0.12);border:1px solid rgba(209,99,167,0.3);color:var(--error);font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:16px;display:none;}
-.login-error.visible{display:block;}
-.remember-row{display:flex;align-items:center;gap:8px;margin-bottom:18px;}
-.remember-row input{width:auto;}
-.remember-row label{font-size:13px;color:var(--muted);cursor:pointer;}
-
-/* ---------- Dashboard ---------- */
-#appScreen{min-height:100vh;}
-header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
-.brand{font-size:19px;font-weight:800;letter-spacing:-0.02em;display:flex;align-items:center;gap:10px;}
-.brand span{color:var(--accent);}
-.header-right{display:flex;align-items:center;gap:16px;}
-.status-pill{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px;}
-.status-dot{width:8px;height:8px;border-radius:50%;background:var(--faint);display:inline-block;}
-.status-dot.online{background:var(--success);box-shadow:0 0 6px var(--success);}
-.status-dot.offline{background:var(--error);box-shadow:0 0 6px var(--error);}
-.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;font-family:inherit;transition:all .15s;}
-.btn-ghost:hover{color:var(--text);border-color:var(--muted);}
-
-.container{max-width:1400px;margin:0 auto;padding:24px;}
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px;}
-.kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;}
-.kpi .label{font-size:13px;color:var(--muted);margin-bottom:8px;}
-.kpi .value{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;}
-.kpi .sub{font-size:12px;color:var(--faint);margin-top:4px;}
-.charts-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px;}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;}
-.card h2{font-size:15px;font-weight:600;margin-bottom:16px;color:var(--text);}
-.period-btns{display:flex;gap:8px;margin-bottom:16px;}
-.period-btn{background:var(--surface-alt);border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;}
-.period-btn.active{background:var(--accent);color:#0f1413;font-weight:600;border-color:var(--accent);}
-table{width:100%;border-collapse:collapse;font-size:13px;}
-th{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:500;}
-td{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.04);}
-tr:hover td{background:rgba(255,255,255,0.03);}
-.loading{text-align:center;color:var(--muted);padding:40px;font-size:14px;}
-.error-box{color:var(--error);font-size:13px;padding:8px;}
-.branch-item{display:flex;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);}
-.branch-name{flex:1;font-size:14px;}
-.branch-rev{font-size:14px;font-weight:600;color:var(--accent);}
-@media(max-width:768px){.charts-grid{grid-template-columns:1fr;}.kpi-grid{grid-template-columns:repeat(2,1fr);}}
-</style>
 </head>
 <body>
 
@@ -114,18 +46,22 @@ tr:hover td{background:rgba(255,255,255,0.03);}
 <!-- ================= APP SCREEN ================= -->
 <div id="appScreen" class="hidden">
 <header>
-<div class="brand">Aqba <span>Dashboard</span></div>
-<div class="header-right">
-<div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
-<button class="btn-ghost" id="logoutBtn">Выйти</button>
-</div>
+  <div class="header-top">
+    <div class="brand">Aqba <span>Dashboard</span></div>
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <nav class="tabs" id="mainNav"></nav>
 </header>
 <div class="container">
+<div class="page-title">Обзор</div>
 <div class="kpi-grid">
-<div class="kpi"><div class="label">Выручка</div><div class="value" id="kpiRevenue">—</div><div class="sub">рублей, сегодня</div></div>
-<div class="kpi"><div class="label">Чеки</div><div class="value" id="kpiOrders">—</div><div class="sub">штук</div></div>
-<div class="kpi"><div class="label">Средний чек</div><div class="value" id="kpiAvg">—</div><div class="sub">рублей</div></div>
-<div class="kpi"><div class="label">Гости</div><div class="value" id="kpiGuests">—</div><div class="sub">человек</div></div>
+<div class="kpi"><div class="label">Выручка</div><div class="value" id="kpiRevenue">—</div><div class="sub">рублей, сегодня</div><div class="delta" id="kpiRevenueDelta"></div></div>
+<div class="kpi"><div class="label">Чеки</div><div class="value" id="kpiOrders">—</div><div class="sub">штук</div><div class="delta" id="kpiOrdersDelta"></div></div>
+<div class="kpi"><div class="label">Средний чек</div><div class="value" id="kpiAvg">—</div><div class="sub">рублей</div><div class="delta" id="kpiAvgDelta"></div></div>
+<div class="kpi"><div class="label">Гости</div><div class="value" id="kpiGuests">—</div><div class="sub">человек, оценка</div></div>
 <div class="kpi"><div class="label">Прогноз выручки</div><div class="value" id="kpiForecast">—</div><div class="sub">рублей, неделя</div></div>
 <div class="kpi"><div class="label">Выполнение плана</div><div class="value" id="kpiPlan">—</div><div class="sub">%</div></div>
 </div>
@@ -141,114 +77,20 @@ tr:hover td{background:rgba(255,255,255,0.03);}
 <div class="card"><h2>По отделениям</h2><canvas id="chartDepts" height="220"></canvas></div>
 </div>
 <div class="card">
-<h2>Топ-20 блюд</h2>
-<div class="period-btns">
-<button class="period-btn active" onclick="loadDishes(7,this)">7 дней</button>
-<button class="period-btn" onclick="loadDishes(30,this)">30 дней</button>
-</div>
+<h2>Топ-10 блюд сегодня<span class="hint">полный рейтинг — на странице «Меню»</span></h2>
 <div id="dishesTable"><div class="loading">Загрузка...</div></div>
 </div>
-<div class="card" style="margin-top:24px;">
-<h2>Рейтинг филиалов</h2>
+<div class="card">
+<h2>Рейтинг филиалов<span class="hint">за 30 дней, изменение к предыдущим 30 дням</span></h2>
 <div id="branchesContainer"><div class="loading">Загрузка...</div></div>
 </div>
 </div>
 </div>
 
+<script src="shared.js"></script>
 <script>
-const API = window.location.hostname === 'localhost' && window.location.port === '3000' ? 'http://localhost:3001' : '';
 let chartRev = null, chartDept = null;
-let pollTimers = [];
 
-async function api(path, opts = {}) {
-  const r = await fetch(API + path, { credentials: 'include', ...opts });
-  if (r.status === 401) { showLogin(); throw new Error('not_authenticated'); }
-  if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new Error(body.error || ('HTTP ' + r.status));
-  }
-  return r.json();
-}
-function fmt(n) { return Number(n || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }); }
-
-// ---------------- Login flow ----------------
-const LS_KEY = 'aqba_login_prefs';
-
-function loadSavedPrefs() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return;
-    const { server, login } = JSON.parse(raw);
-    if (server) document.getElementById('fServer').value = server;
-    if (login) document.getElementById('fLogin').value = login;
-  } catch {}
-}
-
-function showLogin() {
-  clearPolling();
-  document.getElementById('appScreen').classList.add('hidden');
-  document.getElementById('loginScreen').classList.remove('hidden');
-}
-function showApp() {
-  document.getElementById('loginScreen').classList.add('hidden');
-  document.getElementById('appScreen').classList.remove('hidden');
-  startApp();
-}
-
-document.getElementById('loginForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const server = document.getElementById('fServer').value.trim();
-  const login = document.getElementById('fLogin').value.trim();
-  const password = document.getElementById('fPassword').value;
-  const remember = document.getElementById('fRemember').checked;
-  const errBox = document.getElementById('loginError');
-  const btn = document.getElementById('loginBtn');
-  errBox.classList.remove('visible');
-  btn.disabled = true;
-  btn.textContent = 'Входим...';
-  try {
-    await api('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: server, login, password }),
-    });
-    if (remember) {
-      localStorage.setItem(LS_KEY, JSON.stringify({ server, login }));
-    } else {
-      localStorage.removeItem(LS_KEY);
-    }
-    document.getElementById('fPassword').value = '';
-    showApp();
-  } catch (err) {
-    errBox.textContent = err.message === 'not_authenticated'
-      ? 'Сессия истекла, попробуйте снова'
-      : (err.message || 'Не удалось подключиться к серверу iiko');
-    errBox.classList.add('visible');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Войти';
-  }
-});
-
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-  try { await api('/api/auth/logout', { method: 'POST' }); } catch {}
-  showLogin();
-});
-
-// ---------------- Dashboard logic ----------------
-
-async function loadStatus() {
-  try {
-    const d = await api('/api/health');
-    document.getElementById('dot').className = 'status-dot ' + (d.status === 'online' ? 'online' : 'offline');
-    document.getElementById('statusText').textContent = d.status === 'online' ? 'Онлайн — ' + d.url : 'Сервер недоступен';
-  } catch (e) {
-    if (e.message !== 'not_authenticated') {
-      document.getElementById('dot').className = 'status-dot offline';
-      document.getElementById('statusText').textContent = 'Ошибка соединения';
-    }
-  }
-}
 async function loadSummary() {
   try {
     const d = await api('/api/dashboard');
@@ -256,9 +98,24 @@ async function loadSummary() {
     document.getElementById('kpiOrders').textContent = fmt(d.orders);
     document.getElementById('kpiAvg').textContent = fmt(d.avgCheck);
     document.getElementById('kpiGuests').textContent = fmt(d.guests || 0);
+    if (d.comparedToYesterday) {
+      const c = d.comparedToYesterday;
+      setDelta('kpiRevenueDelta', c.revenueChangePct, 'к вчера');
+      setDelta('kpiOrdersDelta', c.ordersChangePct, 'к вчера');
+      setDelta('kpiAvgDelta', c.avgCheckChangePct, 'к вчера');
+    }
     if (d.byDepartment && d.byDepartment.length) renderDeptChart(d.byDepartment);
   } catch (e) { console.error(e); }
 }
+
+function setDelta(id, pct, suffix) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const cls = deltaClass(pct);
+  el.className = 'delta ' + cls;
+  el.textContent = deltaArrow(pct) + ' ' + fmtPct(pct) + ' ' + suffix;
+}
+
 async function loadForecast() {
   try {
     const d = await api('/api/forecast');
@@ -266,6 +123,7 @@ async function loadForecast() {
     document.getElementById('kpiPlan').textContent = (d.planCompletion || 0);
   } catch (e) { console.error(e); }
 }
+
 async function loadChart(days, btn) {
   document.querySelectorAll('#appScreen .charts-grid .period-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
@@ -280,6 +138,7 @@ async function loadChart(days, btn) {
     });
   } catch (e) { console.error(e); }
 }
+
 function renderDeptChart(data) {
   const ctx = document.getElementById('chartDepts').getContext('2d');
   if (chartDept) chartDept.destroy();
@@ -289,49 +148,34 @@ function renderDeptChart(data) {
     options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#cdccca', font: { size: 11 } } } } },
   });
 }
-async function loadDishes(days, btn) {
-  document.querySelectorAll('#appScreen .card:nth-of-type(3) .period-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+
+async function loadDishes() {
   const el = document.getElementById('dishesTable');
-  el.innerHTML = '<div class="loading">Загрузка...</div>';
   try {
-    const d = await api('/api/top-dishes?days=' + days);
-    if (!d.dishes.length) { el.innerHTML = '<div class="loading">Нет данных</div>'; return; }
+    const d = await api('/api/top-dishes?days=1');
+    if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Нет продаж сегодня</div>'; return; }
     el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Категория</th><th>Кол-во</th><th>Сумма, ₽</th></tr></thead><tbody>' +
-      d.dishes.map((r, i) => `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.category || '—'}</td><td>${fmt(r.amount)}</td><td>${fmt(r.revenue)}</td></tr>`).join('') +
+      d.dishes.slice(0, 10).map((r, i) => `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.category || '—'}</td><td>${fmt(r.amount)}</td><td>${fmt(r.revenue)}</td></tr>`).join('') +
       '</tbody></table>';
   } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
 }
+
 async function loadBranches() {
   const el = document.getElementById('branchesContainer');
   try {
     const d = await api('/api/branches?days=30');
-    if (!d.branches.length) { el.innerHTML = '<div class="loading">Нет данных</div>'; return; }
-    el.innerHTML = d.branches.slice(0, 10).map(b => `<div class="branch-item"><div class="branch-name">${b.name}</div><div class="branch-rev">${fmt(b.revenue)} ₽</div></div>`).join('');
+    if (!d.branches.length) { el.innerHTML = '<div class="empty-box">Нет данных</div>'; return; }
+    el.innerHTML = d.branches.slice(0, 10).map(b => {
+      const cls = deltaClass(b.changePct);
+      return `<div class="branch-item"><div class="branch-name">${b.name}</div><div class="branch-rev">${fmt(b.revenue)} ₽</div><div class="branch-change ${cls}">${deltaArrow(b.changePct)} ${fmtPct(b.changePct)}</div></div>`;
+    }).join('');
   } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
 }
 
-function clearPolling() {
-  pollTimers.forEach(clearInterval);
-  pollTimers = [];
-}
-function startApp() {
-  loadStatus(); loadSummary(); loadForecast(); loadChart(7); loadDishes(7); loadBranches();
-  clearPolling();
-  pollTimers.push(setInterval(loadStatus, 30000));
+function startPage() {
+  loadSummary(); loadForecast(); loadChart(7); loadDishes(); loadBranches();
   pollTimers.push(setInterval(loadSummary, 60000));
 }
-
-// ---------------- Boot ----------------
-(async function boot() {
-  loadSavedPrefs();
-  try {
-    await api('/api/auth/me');
-    showApp();
-  } catch {
-    showLogin();
-  }
-})();
 </script>
 </body>
 </html>

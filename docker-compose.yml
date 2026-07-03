@@ -5,6 +5,8 @@ services:
     ports:
       - "3001:3001"
     env_file: .env
+    volumes:
+      - iiko_sessions:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/ping"]
@@ -37,3 +39,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  iiko_sessions:

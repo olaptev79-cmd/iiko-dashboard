@@ -237,6 +237,71 @@ class IikoClient {
     });
   }
 
+  /** Sales grouped by hour of day (0-23) — powers the hourly activity heatmap. */
+  async getOlapHourly(from, to) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: true,
+      groupByRowFields: ["OpenDate.Typed", "HourOpen"],
+      aggregateFields: ["DishAmountInt", "DishSumInt", "UniqOrderId"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
+  /** Sales grouped by payment type (cash / card / other) and discounts. */
+  async getOlapPayments(from, to) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: true,
+      groupByRowFields: ["PayTypes"],
+      aggregateFields: ["DishSumInt", "DishDiscountSumInt", "DishAmountInt"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
+  /** Sales grouped by order type (dine-in / delivery / takeaway if available). */
+  async getOlapOrderTypes(from, to) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: true,
+      groupByRowFields: ["OrderType", "DeletedWithWriteoff"],
+      aggregateFields: ["DishSumInt", "DishAmountInt"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
+  /** Sales grouped by dish category for menu/ABC analysis, incl. discounts. */
+  async getOlapDishGroups(from, to) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: true,
+      groupByRowFields: ["DishGroup", "DishCategory"],
+      aggregateFields: ["DishAmountInt", "DishSumInt", "DishDiscountSumInt"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
+  /** Sales grouped by waiter/cashier for a basic employee performance view. */
+  async getOlapByEmployee(from, to) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: true,
+      groupByRowFields: ["WaiterName", "CashierName"],
+      aggregateFields: ["DishAmountInt", "DishSumInt", "UniqOrderId"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
   async ping() {
     try {
       await this.getToken();

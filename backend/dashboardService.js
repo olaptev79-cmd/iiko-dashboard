@@ -1,5 +1,6 @@
 const pad = (n) => String(n).padStart(2, "0");
 const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const WEEKDAYS_RU = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
 
 // iiko OLAP DATE-type range filters use a half-open interval: "to" is
 // EXCLUSIVE (the day after the last day you want), with includeHigh:false.
@@ -11,13 +12,29 @@ function todayRange() {
   return { from: fmt(now), to: fmt(tomorrow), date: fmt(now) };
 }
 
-function daysRange(n) {
-  const now = new Date(),
-    from = new Date(now);
+function daysRange(n, offsetDays = 0) {
+  const now = new Date();
+  now.setDate(now.getDate() - offsetDays);
+  const from = new Date(now);
   from.setDate(from.getDate() - n + 1);
   const to = new Date(now);
   to.setDate(to.getDate() + 1);
   return { from: fmt(from), to: fmt(to) };
+}
+
+/** Runs an async fn, swallowing errors into a uniform { ok:false, error } shape
+ *  so a single unavailable OLAP field/report never breaks an entire page. */
+async function safe(fn) {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  }
+}
+
+function pctChange(current, previous) {
+  if (!previous) return current > 0 ? 100 : 0;
+  return +(((current - previous) / previous) * 100).toFixed(1);
 }
 
 async function getStatus(client, meta) {
@@ -30,27 +47,49 @@ async function getStatus(client, meta) {
   };
 }
 
-async function getSummary(client) {
-  const { from, to, date } = todayRange();
-  const [olapRes, deptsRes] = await Promise.allSettled([
-    client.getOlapSales(from, to),
-    client.getDepartments(),
-  ]);
+/** Aggregates raw OLAP sales rows into { revenue, orders, byDepartment }. */
+function aggregateSales(client, olapRaw) {
   let revenue = 0,
     orders = 0;
   const byDept = {};
+  client.parseOlap(olapRaw).forEach((r) => {
+    const s = parseFloat(r["DishSumInt"] || 0);
+    const c = parseInt(r["DishAmountInt"] || 0, 10);
+    revenue += s;
+    orders += c;
+    const name = r["Department"] || "Прочее";
+    if (!byDept[name]) byDept[name] = { revenue: 0, orders: 0 };
+    byDept[name].revenue += s;
+    byDept[name].orders += c;
+  });
+  return { revenue, orders, byDept };
+}
+
+async function getSummary(client) {
+  const { from, to, date } = todayRange();
+  const yesterday = daysRange(1, 1);
+
+  const [olapRes, prevRes, deptsRes] = await Promise.allSettled([
+    client.getOlapSales(from, to),
+    client.getOlapSales(yesterday.from, yesterday.to),
+    client.getDepartments(),
+  ]);
+
+  let revenue = 0,
+    orders = 0,
+    byDept = {};
   if (olapRes.status === "fulfilled" && olapRes.value) {
-    client.parseOlap(olapRes.value).forEach((r) => {
-      const s = parseFloat(r["DishSumInt"] || 0);
-      const c = parseInt(r["DishAmountInt"] || 0, 10);
-      revenue += s;
-      orders += c;
-      const name = r["Department"] || "Прочее";
-      if (!byDept[name]) byDept[name] = { revenue: 0, orders: 0 };
-      byDept[name].revenue += s;
-      byDept[name].orders += c;
-    });
+    ({ revenue, orders, byDept } = aggregateSales(client, olapRes.value));
   }
+
+  let prevRevenue = 0,
+    prevOrders = 0;
+  if (prevRes.status === "fulfilled" && prevRes.value) {
+    const agg = aggregateSales(client, prevRes.value);
+    prevRevenue = agg.revenue;
+    prevOrders = agg.orders;
+  }
+
   const deptArr =
     deptsRes.status === "fulfilled"
       ? Array.isArray(deptsRes.value)
@@ -59,11 +98,15 @@ async function getSummary(client) {
         ? deptsRes.value.items
         : []
       : [];
+
+  const avgCheck = orders > 0 ? +(revenue / orders).toFixed(2) : 0;
+  const prevAvgCheck = prevOrders > 0 ? +(prevRevenue / prevOrders).toFixed(2) : 0;
+
   return {
     date,
     revenue: +revenue.toFixed(2),
     orders,
-    avgCheck: orders > 0 ? +(revenue / orders).toFixed(2) : 0,
+    avgCheck,
     guests: Math.round(orders * 1.21),
     departmentsCount: deptArr.length,
     byDepartment: Object.entries(byDept)
@@ -73,6 +116,14 @@ async function getSummary(client) {
         orders: v.orders,
       }))
       .sort((a, b) => b.revenue - a.revenue),
+    comparedToYesterday: {
+      revenue: +prevRevenue.toFixed(2),
+      orders: prevOrders,
+      avgCheck: prevAvgCheck,
+      revenueChangePct: pctChange(revenue, prevRevenue),
+      ordersChangePct: pctChange(orders, prevOrders),
+      avgCheckChangePct: pctChange(avgCheck, prevAvgCheck),
+    },
     source: olapRes.status === "fulfilled" ? "live" : "error",
     error: olapRes.status === "rejected" ? olapRes.reason.message : undefined,
   };
@@ -98,6 +149,56 @@ async function getChart(client, days = 7) {
   };
 }
 
+/** Revenue/orders bucketed by weekday (Пн..Вс) to reveal weekly patterns. */
+async function getWeekdayBreakdown(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const olapRaw = await client.getOlapSales(from, to);
+  const byWeekday = Array.from({ length: 7 }, () => ({ revenue: 0, orders: 0, days: new Set() }));
+  client.parseOlap(olapRaw).forEach((r) => {
+    const d = (r["OpenDate.Typed"] || "").slice(0, 10);
+    if (!d) return;
+    const dow = new Date(d + "T00:00:00").getDay();
+    byWeekday[dow].revenue += parseFloat(r["DishSumInt"] || 0);
+    byWeekday[dow].orders += parseInt(r["DishAmountInt"] || 0, 10);
+    byWeekday[dow].days.add(d);
+  });
+  // Reorder Пн..Вс instead of JS default Вс..Сб
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  return {
+    labels: order.map((i) => WEEKDAYS_RU[i]),
+    revenue: order.map((i) => +byWeekday[i].revenue.toFixed(2)),
+    orders: order.map((i) => byWeekday[i].orders),
+    avgRevenuePerDay: order.map((i) =>
+      byWeekday[i].days.size > 0 ? +(byWeekday[i].revenue / byWeekday[i].days.size).toFixed(2) : 0
+    ),
+    source: "live",
+  };
+}
+
+/** Hourly activity heatmap data — falls back gracefully if HourOpen is unsupported. */
+async function getHourlyActivity(client, days = 7) {
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapHourly(from, to));
+  if (!res.ok) return { available: false, error: res.error, hours: [] };
+  const byHour = Array.from({ length: 24 }, () => ({ revenue: 0, orders: 0 }));
+  client.parseOlap(res.value).forEach((r) => {
+    let h = parseInt(r["HourOpen"], 10);
+    if (Number.isNaN(h)) {
+      // Some iiko builds return HourOpen as "HH" string or as OpenTime; try to parse defensively
+      const raw = r["HourOpen"];
+      h = raw != null ? parseInt(String(raw).slice(0, 2), 10) : NaN;
+    }
+    if (Number.isNaN(h) || h < 0 || h > 23) return;
+    byHour[h].revenue += parseFloat(r["DishSumInt"] || 0);
+    byHour[h].orders += parseInt(r["DishAmountInt"] || 0, 10);
+  });
+  return {
+    available: true,
+    hours: byHour.map((h, i) => ({ hour: i, revenue: +h.revenue.toFixed(2), orders: h.orders })),
+    source: "live",
+  };
+}
+
 async function getTopDishes(client, days = 7) {
   const { from, to } = daysRange(days);
   const olapRaw = await client.getOlapTopDishes(from, to);
@@ -114,6 +215,50 @@ async function getTopDishes(client, days = 7) {
   };
 }
 
+/** Full menu breakdown by category with ABC classification (A=80%, B=15%, C=5% of revenue). */
+async function getMenuAnalysis(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const olapRaw = await client.getOlapTopDishes(from, to);
+  const rows = client.parseOlap(olapRaw)
+    .map((r) => ({
+      name: r["DishName"] || "—",
+      category: r["DishGroup"] || "Без категории",
+      amount: parseInt(r["DishAmountInt"] || 0, 10),
+      revenue: +parseFloat(r["DishSumInt"] || 0).toFixed(2),
+    }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
+  let cumulative = 0;
+  const dishes = rows.map((r) => {
+    cumulative += r.revenue;
+    const cumPct = totalRevenue > 0 ? (cumulative / totalRevenue) * 100 : 0;
+    const abc = cumPct <= 80 ? "A" : cumPct <= 95 ? "B" : "C";
+    return { ...r, share: totalRevenue > 0 ? +((r.revenue / totalRevenue) * 100).toFixed(2) : 0, abc };
+  });
+
+  const byCategory = {};
+  dishes.forEach((d) => {
+    if (!byCategory[d.category]) byCategory[d.category] = { revenue: 0, amount: 0, dishCount: 0 };
+    byCategory[d.category].revenue += d.revenue;
+    byCategory[d.category].amount += d.amount;
+    byCategory[d.category].dishCount += 1;
+  });
+
+  const abcSummary = { A: 0, B: 0, C: 0 };
+  dishes.forEach((d) => (abcSummary[d.abc] += 1));
+
+  return {
+    dishes,
+    categories: Object.entries(byCategory)
+      .map(([name, v]) => ({ name, revenue: +v.revenue.toFixed(2), amount: v.amount, dishCount: v.dishCount }))
+      .sort((a, b) => b.revenue - a.revenue),
+    abcSummary,
+    totalRevenue: +totalRevenue.toFixed(2),
+    source: "live",
+  };
+}
+
 async function getDepartments(client) {
   const data = await client.getDepartments();
   const items = Array.isArray(data) ? data : data && data.items ? data.items : [];
@@ -122,19 +267,143 @@ async function getDepartments(client) {
 
 async function getBranches(client, days = 30) {
   const { from, to } = daysRange(days);
-  const olapRaw = await client.getOlapSales(from, to);
+  const cur = daysRange(days);
+  const prevOffset = days;
+  const prevRange = daysRange(days, prevOffset);
+
+  const [curRes, prevRes] = await Promise.allSettled([
+    client.getOlapSales(cur.from, cur.to),
+    client.getOlapSales(prevRange.from, prevRange.to),
+  ]);
+
   const byDept = {};
-  client.parseOlap(olapRaw).forEach((r) => {
-    const name = r["Department"] || "Прочее";
-    const id = r["Department.Id"] || name;
-    if (!byDept[id]) byDept[id] = { name, revenue: 0, orders: 0 };
-    byDept[id].revenue += parseFloat(r["DishSumInt"] || 0);
-    byDept[id].orders += parseInt(r["DishAmountInt"] || 0, 10);
-  });
+  if (curRes.status === "fulfilled") {
+    client.parseOlap(curRes.value).forEach((r) => {
+      const name = r["Department"] || "Прочее";
+      const id = r["Department.Id"] || name;
+      if (!byDept[id]) byDept[id] = { name, revenue: 0, orders: 0, prevRevenue: 0 };
+      byDept[id].revenue += parseFloat(r["DishSumInt"] || 0);
+      byDept[id].orders += parseInt(r["DishAmountInt"] || 0, 10);
+    });
+  }
+  if (prevRes.status === "fulfilled") {
+    client.parseOlap(prevRes.value).forEach((r) => {
+      const name = r["Department"] || "Прочее";
+      const id = r["Department.Id"] || name;
+      if (!byDept[id]) byDept[id] = { name, revenue: 0, orders: 0, prevRevenue: 0 };
+      byDept[id].prevRevenue += parseFloat(r["DishSumInt"] || 0);
+    });
+  }
+
   const branches = Object.values(byDept)
-    .map((b) => ({ ...b, revenue: +b.revenue.toFixed(2) }))
+    .map((b) => ({
+      ...b,
+      revenue: +b.revenue.toFixed(2),
+      prevRevenue: +b.prevRevenue.toFixed(2),
+      changePct: pctChange(b.revenue, b.prevRevenue),
+    }))
     .sort((a, b) => b.revenue - a.revenue);
   return { branches, source: "live" };
+}
+
+/** Payment type + discount breakdown. Gracefully degrades if fields unsupported. */
+async function getPayments(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapPayments(from, to));
+  if (!res.ok) return { available: false, error: res.error, payTypes: [], totalDiscount: 0 };
+  const byType = {};
+  let totalDiscount = 0;
+  let totalRevenue = 0;
+  client.parseOlap(res.value).forEach((r) => {
+    const name = r["PayTypes"] || "Не указано";
+    const sum = parseFloat(r["DishSumInt"] || 0);
+    const discount = parseFloat(r["DishDiscountSumInt"] || 0);
+    const amount = parseInt(r["DishAmountInt"] || 0, 10);
+    if (!byType[name]) byType[name] = { revenue: 0, amount: 0 };
+    byType[name].revenue += sum;
+    byType[name].amount += amount;
+    totalDiscount += discount;
+    totalRevenue += sum;
+  });
+  return {
+    available: true,
+    payTypes: Object.entries(byType)
+      .map(([name, v]) => ({
+        name,
+        revenue: +v.revenue.toFixed(2),
+        amount: v.amount,
+        share: totalRevenue > 0 ? +((v.revenue / totalRevenue) * 100).toFixed(1) : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue),
+    totalDiscount: +totalDiscount.toFixed(2),
+    totalRevenue: +totalRevenue.toFixed(2),
+    source: "live",
+  };
+}
+
+/** Order type (dine-in / delivery / takeaway) breakdown, if supported by this iiko install. */
+async function getOrderTypes(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapOrderTypes(from, to));
+  if (!res.ok) return { available: false, error: res.error, types: [] };
+  const byType = {};
+  client.parseOlap(res.value).forEach((r) => {
+    const name = r["OrderType"] || "Не указано";
+    if (!byType[name]) byType[name] = { revenue: 0, orders: 0 };
+    byType[name].revenue += parseFloat(r["DishSumInt"] || 0);
+    byType[name].orders += parseInt(r["DishAmountInt"] || 0, 10);
+  });
+  return {
+    available: true,
+    types: Object.entries(byType)
+      .map(([name, v]) => ({ name, revenue: +v.revenue.toFixed(2), orders: v.orders }))
+      .sort((a, b) => b.revenue - a.revenue),
+    source: "live",
+  };
+}
+
+/** Employee (waiter/cashier) performance ranking, if supported by this iiko install. */
+async function getEmployeePerformance(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapByEmployee(from, to));
+  if (!res.ok) return { available: false, error: res.error, employees: [] };
+  const byName = {};
+  client.parseOlap(res.value).forEach((r) => {
+    const name = r["WaiterName"] || r["CashierName"] || "Не указано";
+    if (name === "Не указано" && !r["WaiterName"] && !r["CashierName"]) return;
+    if (!byName[name]) byName[name] = { revenue: 0, orders: 0 };
+    byName[name].revenue += parseFloat(r["DishSumInt"] || 0);
+    byName[name].orders += parseInt(r["DishAmountInt"] || 0, 10);
+  });
+  return {
+    available: true,
+    employees: Object.entries(byName)
+      .map(([name, v]) => ({
+        name,
+        revenue: +v.revenue.toFixed(2),
+        orders: v.orders,
+        avgCheck: v.orders > 0 ? +(v.revenue / v.orders).toFixed(2) : 0,
+      }))
+      .sort((a, b) => b.revenue - a.revenue),
+    source: "live",
+  };
+}
+
+/** Employee directory (name/role/status) from the corporation API — separate from sales stats. */
+async function getEmployeeDirectory(client) {
+  const res = await safe(() => client.getEmployees());
+  if (!res.ok) return { available: false, error: res.error, employees: [] };
+  const data = res.value;
+  const items = Array.isArray(data) ? data : data && data.items ? data.items : [];
+  return {
+    available: true,
+    employees: items.map((e) => ({
+      name: [e.lastName, e.firstName].filter(Boolean).join(" ") || e.name || e.login || "—",
+      role: (e.mainRoleName || e.roleName || (Array.isArray(e.roles) ? e.roles.join(", ") : "")) || "—",
+      status: e.deleted ? "уволен" : e.suspended ? "приостановлен" : "активен",
+    })),
+    source: "live",
+  };
 }
 
 async function getForecast(client) {
@@ -160,8 +429,15 @@ module.exports = {
   getStatus,
   getSummary,
   getChart,
+  getWeekdayBreakdown,
+  getHourlyActivity,
   getTopDishes,
+  getMenuAnalysis,
   getDepartments,
   getBranches,
+  getPayments,
+  getOrderTypes,
+  getEmployeePerformance,
+  getEmployeeDirectory,
   getForecast,
 };

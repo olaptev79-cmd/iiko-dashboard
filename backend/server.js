@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const IikoClient = require("./iikoClient");
 const sessionStore = require("./sessionStore");
@@ -11,11 +12,42 @@ const PORT = process.env.PORT || 3001;
 const COOKIE_NAME = "aqba_sid";
 const IS_PROD = process.env.NODE_ENV === "production";
 
-app.use(cors({ origin: true, credentials: true }));
+// Comma-separated list of allowed origins in production, e.g.
+// ALLOWED_ORIGINS=https://dashboard.example.com,https://www.example.com
+// If unset, falls back to reflecting the request origin (dev-friendly default).
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  helmet({
+    // The frontend is served from a separate nginx container/CDN; a strict
+    // default CSP would block that setup unless carefully tuned there too,
+    // so we keep helmet's other protections (HSTS, no-sniff, frameguard,
+    // etc.) and leave CSP to the frontend's own server config.
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // same-origin / curl / server-to-server
+      if (ALLOWED_ORIGINS.length === 0) return cb(null, true); // dev fallback
+      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+      cb(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 
 app.use((req, _res, next) => {
+  // Never log request bodies here — /api/auth/login carries a plaintext
+  // password and must not end up in logs/output.
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   next();
 });
@@ -25,9 +57,19 @@ const wrap = (fn) => async (req, res) => {
     res.json(await fn(req));
   } catch (e) {
     console.error(e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: sanitizeError(e.message) });
   }
 };
+
+/** Strips anything that looks like it could leak internal details (stack
+ *  frames, file paths, credentials echoed back from iiko errors) before
+ *  the message reaches the client. */
+function sanitizeError(message) {
+  if (!message) return "Внутренняя ошибка сервера";
+  return String(message)
+    .replace(/\/[^\s"']*\.(js|ts):\d+/g, "[internal]")
+    .slice(0, 500);
+}
 
 function setSessionCookie(res, sid) {
   res.cookie(COOKIE_NAME, sid, {
@@ -77,14 +119,17 @@ app.post("/api/auth/login", loginRateLimit, async (req, res) => {
   if (!url || !login || !password) {
     return res.status(400).json({ error: "url, login and password are required" });
   }
+  // IMPORTANT: never log `password` (or the full req.body) anywhere below.
   try {
     const client = new IikoClient(url, login, password);
     await client.verify();
     const sid = sessionStore.create(url, login, password);
     setSessionCookie(res, sid);
+    console.log(`[auth] Успешный вход: ${login}@${client.baseUrl}`);
     res.json({ ok: true, url: client.baseUrl, login });
   } catch (e) {
-    res.status(401).json({ error: e.message || "Не удалось авторизоваться на сервере iiko" });
+    console.log(`[auth] Неудачная попытка входа: ${login}@${String(url).slice(0, 60)}`);
+    res.status(401).json({ error: sanitizeError(e.message) || "Не удалось авторизоваться на сервере iiko" });
   }
 });
 
@@ -107,13 +152,61 @@ app.get("/api/auth/me", (req, res) => {
 app.get("/api/health", requireAuth, wrap((r) => svc.getStatus(r.client, r.sessionMeta)));
 app.get("/api/dashboard", requireAuth, wrap((r) => svc.getSummary(r.client)));
 app.get("/api/chart", requireAuth, wrap((r) => svc.getChart(r.client, Number(r.query.days) || 7)));
+app.get("/api/weekday-breakdown", requireAuth, wrap((r) => svc.getWeekdayBreakdown(r.client, Number(r.query.days) || 30)));
+app.get("/api/hourly-activity", requireAuth, wrap((r) => svc.getHourlyActivity(r.client, Number(r.query.days) || 7)));
 app.get("/api/top-dishes", requireAuth, wrap((r) => svc.getTopDishes(r.client, Number(r.query.days) || 7)));
+app.get("/api/menu-analysis", requireAuth, wrap((r) => svc.getMenuAnalysis(r.client, Number(r.query.days) || 30)));
 app.get("/api/departments", requireAuth, wrap((r) => svc.getDepartments(r.client)));
 app.get("/api/branches", requireAuth, wrap((r) => svc.getBranches(r.client, Number(r.query.days) || 30)));
+app.get("/api/payments", requireAuth, wrap((r) => svc.getPayments(r.client, Number(r.query.days) || 30)));
+app.get("/api/order-types", requireAuth, wrap((r) => svc.getOrderTypes(r.client, Number(r.query.days) || 30)));
+app.get("/api/employees/performance", requireAuth, wrap((r) => svc.getEmployeePerformance(r.client, Number(r.query.days) || 30)));
+app.get("/api/employees/directory", requireAuth, wrap((r) => svc.getEmployeeDirectory(r.client)));
 app.get("/api/forecast", requireAuth, wrap((r) => svc.getForecast(r.client)));
+
+// CSV export for the top-dishes report (Excel-friendly, UTF-8 BOM + ;-separated).
+app.get(
+  "/api/export/top-dishes.csv",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const days = Number(req.query.days) || 30;
+      const data = await svc.getTopDishes(req.client, days);
+      const header = "Блюдо;Категория;Количество;Выручка";
+      const rows = data.dishes.map((d) => `${csvEscape(d.name)};${csvEscape(d.category)};${d.amount};${d.revenue}`);
+      const csv = "\uFEFF" + [header, ...rows].join("\r\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="top-dishes-${days}d.csv"`);
+      res.send(csv);
+    } catch (e) {
+      res.status(500).json({ error: sanitizeError(e.message) });
+    }
+  }
+);
+
+function csvEscape(value) {
+  const s = String(value == null ? "" : value);
+  return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
 
 // ---------------- Misc ----------------
 
 app.get("/api/ping", (_req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));
 
-app.listen(PORT, () => console.log(`Aqba Dashboard backend запущен на порту ${PORT}`));
+// ---------------- Graceful shutdown ----------------
+// Ensures in-flight requests finish and logs are flushed before the
+// container is actually killed on redeploy/restart (SIGTERM from Docker).
+const server = app.listen(PORT, () => console.log(`Aqba Dashboard backend запущен на порту ${PORT}`));
+
+function shutdown(signal) {
+  console.log(`[server] Получен ${signal}, завершаем работу...`);
+  server.close(() => {
+    console.log("[server] Все соединения закрыты, выход.");
+    process.exit(0);
+  });
+  // Force-exit if close() hangs for too long (e.g. stuck keep-alive sockets).
+  setTimeout(() => process.exit(1), 10000).unref();
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

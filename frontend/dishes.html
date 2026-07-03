@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Меню — Aqba Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo">Aqba <span>Dashboard</span></div>
+      <div class="tagline">Аналитика для iikoRMS / iikoServer</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="fServer">Адрес сервера</label>
+        <input id="fServer" type="text" placeholder="mycompany.iiko.it" autocomplete="url" required/>
+        <div class="field-hint">Можно без https:// — добавим автоматически</div>
+      </div>
+      <div class="field">
+        <label for="fLogin">Логин</label>
+        <input id="fLogin" type="text" placeholder="admin" autocomplete="username" required/>
+      </div>
+      <div class="field">
+        <label for="fPassword">Пароль</label>
+        <input id="fPassword" type="password" placeholder="••••••••" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input id="fRemember" type="checkbox" checked/>
+        <label for="fRemember">Запомнить адрес и логин на этом устройстве</label>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div id="appScreen" class="hidden">
+<header>
+  <div class="header-top">
+    <div class="brand">Aqba <span>Dashboard</span></div>
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <nav class="tabs" id="mainNav"></nav>
+</header>
+<div class="container">
+<div class="page-title">Меню</div>
+
+<div class="kpi-grid">
+<div class="kpi"><div class="label">Выручка по меню</div><div class="value" id="kpiMenuRevenue">—</div><div class="sub">рублей, период</div></div>
+<div class="kpi"><div class="label">Позиций категории A</div><div class="value" id="kpiAbcA">—</div><div class="sub">80% выручки</div></div>
+<div class="kpi"><div class="label">Позиций категории B</div><div class="value" id="kpiAbcB">—</div><div class="sub">15% выручки</div></div>
+<div class="kpi"><div class="label">Позиций категории C</div><div class="value" id="kpiAbcC">—</div><div class="sub">5% выручки, кандидаты на исключение</div></div>
+</div>
+
+<div class="charts-grid-even">
+<div class="card"><h2>Выручка по категориям</h2><canvas id="chartCategories" height="220"></canvas></div>
+<div class="card"><h2>Доля ABC-групп</h2><canvas id="chartAbc" height="220"></canvas></div>
+</div>
+
+<div class="card">
+<h2 style="display:flex;align-items:center;">Топ блюд
+<span class="hint">ABC-анализ по выручке</span>
+<button class="btn-export" onclick="exportCsv()">Экспорт CSV</button>
+</h2>
+<div class="period-btns">
+<button class="period-btn" onclick="loadMenu(7,this)">7 дней</button>
+<button class="period-btn active" onclick="loadMenu(30,this)">30 дней</button>
+<button class="period-btn" onclick="loadMenu(90,this)">90 дней</button>
+</div>
+<div id="menuTable"><div class="loading">Загрузка...</div></div>
+</div>
+
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let chartCategories = null, chartAbc = null, currentDays = 30;
+
+async function loadMenu(days, btn) {
+  currentDays = days;
+  document.querySelectorAll('#appScreen .period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const el = document.getElementById('menuTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/menu-analysis?days=' + days);
+    document.getElementById('kpiMenuRevenue').textContent = fmt(d.totalRevenue);
+    document.getElementById('kpiAbcA').textContent = d.abcSummary.A;
+    document.getElementById('kpiAbcB').textContent = d.abcSummary.B;
+    document.getElementById('kpiAbcC').textContent = d.abcSummary.C;
+
+    renderCategoryChart(d.categories);
+    renderAbcChart(d.abcSummary);
+
+    if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Категория</th><th>Кол-во</th><th>Сумма, ₽</th><th>Доля</th><th>ABC</th></tr></thead><tbody>' +
+      d.dishes.map((r, i) => `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.category || '—'}</td><td>${fmt(r.amount)}</td><td>${fmt(r.revenue)}</td><td>${r.share}%</td><td><span class="badge badge-${r.abc.toLowerCase()}">${r.abc}</span></td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+}
+
+function renderCategoryChart(categories) {
+  const ctx = document.getElementById('chartCategories').getContext('2d');
+  if (chartCategories) chartCategories.destroy();
+  const top = categories.slice(0, 10);
+  chartCategories = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: top.map(c => c.name), datasets: [{ label: 'Выручка, ₽', data: top.map(c => c.revenue), backgroundColor: '#4f98a3', borderRadius: 4 }] },
+    options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876' }, grid: { color: '#393836' } }, y: { ticks: { color: '#cdccca' }, grid: { display: false } } } },
+  });
+}
+
+function renderAbcChart(abc) {
+  const ctx = document.getElementById('chartAbc').getContext('2d');
+  if (chartAbc) chartAbc.destroy();
+  chartAbc = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['A — основная выручка', 'B — стабильные', 'C — кандидаты на исключение'],
+      datasets: [{ data: [abc.A, abc.B, abc.C], backgroundColor: ['#6daa45', '#ffc553', '#d163a7'] }],
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#cdccca', font: { size: 11 } } } } },
+  });
+}
+
+function exportCsv() {
+  downloadCsv('/api/export/top-dishes.csv?days=' + currentDays, `top-dishes-${currentDays}d.csv`);
+}
+
+function startPage() {
+  loadMenu(30);
+}
+</script>
+</body>
+</html>

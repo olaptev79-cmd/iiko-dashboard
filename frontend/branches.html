@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Филиалы — Aqba Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo">Aqba <span>Dashboard</span></div>
+      <div class="tagline">Аналитика для iikoRMS / iikoServer</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="fServer">Адрес сервера</label>
+        <input id="fServer" type="text" placeholder="mycompany.iiko.it" autocomplete="url" required/>
+        <div class="field-hint">Можно без https:// — добавим автоматически</div>
+      </div>
+      <div class="field">
+        <label for="fLogin">Логин</label>
+        <input id="fLogin" type="text" placeholder="admin" autocomplete="username" required/>
+      </div>
+      <div class="field">
+        <label for="fPassword">Пароль</label>
+        <input id="fPassword" type="password" placeholder="••••••••" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input id="fRemember" type="checkbox" checked/>
+        <label for="fRemember">Запомнить адрес и логин на этом устройстве</label>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div id="appScreen" class="hidden">
+<header>
+  <div class="header-top">
+    <div class="brand">Aqba <span>Dashboard</span></div>
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <nav class="tabs" id="mainNav"></nav>
+</header>
+<div class="container">
+<div class="page-title">Филиалы</div>
+
+<div class="card">
+<h2>Сравнение выручки по филиалам<span class="hint">к предыдущему периоду такой же длины</span></h2>
+<div class="period-btns">
+<button class="period-btn" onclick="loadBranches(7,this)">7 дней</button>
+<button class="period-btn active" onclick="loadBranches(30,this)">30 дней</button>
+<button class="period-btn" onclick="loadBranches(90,this)">90 дней</button>
+</div>
+<canvas id="chartBranches" height="180"></canvas>
+</div>
+
+<div class="card">
+<h2>Подробная таблица</h2>
+<div id="branchesTable"><div class="loading">Загрузка...</div></div>
+</div>
+
+<div class="card">
+<h2>Все подразделения организации<span class="hint">справочник из iiko</span></h2>
+<div id="departmentsTable"><div class="loading">Загрузка...</div></div>
+</div>
+
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let chartBranches = null;
+
+async function loadBranches(days, btn) {
+  document.querySelectorAll('#appScreen .card .period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const el = document.getElementById('branchesTable');
+  try {
+    const d = await api('/api/branches?days=' + days);
+    if (!d.branches.length) {
+      document.getElementById('chartBranches').parentElement.querySelector('canvas').style.display = 'none';
+      el.innerHTML = '<div class="empty-box">Нет данных за период</div>';
+      return;
+    }
+    const ctx = document.getElementById('chartBranches').getContext('2d');
+    if (chartBranches) chartBranches.destroy();
+    chartBranches = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: d.branches.map(b => b.name),
+        datasets: [
+          { label: 'Текущий период', data: d.branches.map(b => b.revenue), backgroundColor: '#4f98a3', borderRadius: 4 },
+          { label: 'Предыдущий период', data: d.branches.map(b => b.prevRevenue), backgroundColor: '#393836', borderRadius: 4 },
+        ],
+      },
+      options: { responsive: true, plugins: { legend: { labels: { color: '#cdccca' } } }, scales: { x: { ticks: { color: '#797876' }, grid: { display: false } }, y: { ticks: { color: '#797876' }, grid: { color: '#393836' } } } },
+    });
+
+    el.innerHTML = '<table><thead><tr><th>Филиал</th><th>Выручка</th><th>Чеки</th><th>Пред. период</th><th>Изменение</th></tr></thead><tbody>' +
+      d.branches.map(b => {
+        const cls = deltaClass(b.changePct);
+        return `<tr><td>${b.name}</td><td>${fmt(b.revenue)} ₽</td><td>${fmt(b.orders)}</td><td>${fmt(b.prevRevenue)} ₽</td><td class="branch-change ${cls}" style="text-align:left;">${deltaArrow(b.changePct)} ${fmtPct(b.changePct)}</td></tr>`;
+      }).join('') + '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+}
+
+async function loadDepartments() {
+  const el = document.getElementById('departmentsTable');
+  try {
+    const d = await api('/api/departments');
+    if (!d.departments.length) { el.innerHTML = '<div class="empty-box">Нет данных</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>Название</th><th>Тип</th></tr></thead><tbody>' +
+      d.departments.map(dep => `<tr><td>${dep.name || dep.Name || '—'}</td><td>${dep.type || dep.Type || '—'}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+}
+
+function startPage() {
+  loadBranches(30);
+  loadDepartments();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Сотрудники — Aqba Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo">Aqba <span>Dashboard</span></div>
+      <div class="tagline">Аналитика для iikoRMS / iikoServer</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="fServer">Адрес сервера</label>
+        <input id="fServer" type="text" placeholder="mycompany.iiko.it" autocomplete="url" required/>
+        <div class="field-hint">Можно без https:// — добавим автоматически</div>
+      </div>
+      <div class="field">
+        <label for="fLogin">Логин</label>
+        <input id="fLogin" type="text" placeholder="admin" autocomplete="username" required/>
+      </div>
+      <div class="field">
+        <label for="fPassword">Пароль</label>
+        <input id="fPassword" type="password" placeholder="••••••••" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input id="fRemember" type="checkbox" checked/>
+        <label for="fRemember">Запомнить адрес и логин на этом устройстве</label>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div id="appScreen" class="hidden">
+<header>
+  <div class="header-top">
+    <div class="brand">Aqba <span>Dashboard</span></div>
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <nav class="tabs" id="mainNav"></nav>
+</header>
+<div class="container">
+<div class="page-title">Сотрудники</div>
+
+<div class="card">
+<h2>Продажи по сотрудникам<span class="hint">официант / кассир, если указано в чеках</span></h2>
+<div class="period-btns">
+<button class="period-btn" onclick="loadPerformance(7,this)">7 дней</button>
+<button class="period-btn active" onclick="loadPerformance(30,this)">30 дней</button>
+<button class="period-btn" onclick="loadPerformance(90,this)">90 дней</button>
+</div>
+<div id="perfContainer"><div class="loading">Загрузка...</div></div>
+</div>
+
+<div class="card">
+<h2>Справочник сотрудников<span class="hint">из корпоративного API iiko</span></h2>
+<div id="directoryContainer"><div class="loading">Загрузка...</div></div>
+</div>
+
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let chartPerf = null;
+
+async function loadPerformance(days, btn) {
+  document.querySelectorAll('#appScreen .period-btns .period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const el = document.getElementById('perfContainer');
+  try {
+    const d = await api('/api/employees/performance?days=' + days);
+    if (!d.available) {
+      el.innerHTML = '<div class="unavailable-box">Продажи по сотрудникам недоступны на этом сервере iiko: ' + (d.error || 'нет полей WaiterName/CashierName') + '</div>';
+      return;
+    }
+    if (!d.employees.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    const top = d.employees.slice(0, 15);
+    el.innerHTML = '<canvas id="chartPerf" height="180"></canvas><table style="margin-top:20px;"><thead><tr><th>Сотрудник</th><th>Выручка, ₽</th><th>Чеки</th><th>Средний чек</th></tr></thead><tbody>' +
+      top.map(e => `<tr><td>${e.name}</td><td>${fmt(e.revenue)}</td><td>${fmt(e.orders)}</td><td>${fmt(e.avgCheck)}</td></tr>`).join('') +
+      '</tbody></table>';
+    const ctx = document.getElementById('chartPerf').getContext('2d');
+    if (chartPerf) chartPerf.destroy();
+    chartPerf = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: top.map(e => e.name), datasets: [{ label: 'Выручка, ₽', data: top.map(e => e.revenue), backgroundColor: '#4f98a3', borderRadius: 4 }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876' }, grid: { color: '#393836' } }, y: { ticks: { color: '#cdccca' }, grid: { display: false } } } },
+    });
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+}
+
+async function loadDirectory() {
+  const el = document.getElementById('directoryContainer');
+  try {
+    const d = await api('/api/employees/directory');
+    if (!d.available) {
+      el.innerHTML = '<div class="unavailable-box">Справочник сотрудников недоступен: ' + (d.error || 'нет доступа к /resto/api/employees') + '</div>';
+      return;
+    }
+    if (!d.employees.length) { el.innerHTML = '<div class="empty-box">Нет данных</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>Имя</th><th>Роль</th><th>Статус</th></tr></thead><tbody>' +
+      d.employees.map(e => `<tr><td>${e.name}</td><td>${e.role}</td><td>${e.status}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+}
+
+function startPage() {
+  loadPerformance(30);
+  loadDirectory();
+}
+</script>
+</body>
+</html>

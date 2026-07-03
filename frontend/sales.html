@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Продажи — Aqba Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo">Aqba <span>Dashboard</span></div>
+      <div class="tagline">Аналитика для iikoRMS / iikoServer</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="fServer">Адрес сервера</label>
+        <input id="fServer" type="text" placeholder="mycompany.iiko.it" autocomplete="url" required/>
+        <div class="field-hint">Можно без https:// — добавим автоматически</div>
+      </div>
+      <div class="field">
+        <label for="fLogin">Логин</label>
+        <input id="fLogin" type="text" placeholder="admin" autocomplete="username" required/>
+      </div>
+      <div class="field">
+        <label for="fPassword">Пароль</label>
+        <input id="fPassword" type="password" placeholder="••••••••" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input id="fRemember" type="checkbox" checked/>
+        <label for="fRemember">Запомнить адрес и логин на этом устройстве</label>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div id="appScreen" class="hidden">
+<header>
+  <div class="header-top">
+    <div class="brand">Aqba <span>Dashboard</span></div>
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <nav class="tabs" id="mainNav"></nav>
+</header>
+<div class="container">
+<div class="page-title">Продажи</div>
+
+<div class="card">
+<h2>Динамика выручки и чеков</h2>
+<div class="period-btns">
+<button class="period-btn" onclick="loadChart(7,this)">7 дней</button>
+<button class="period-btn" onclick="loadChart(14,this)">14 дней</button>
+<button class="period-btn active" onclick="loadChart(30,this)">30 дней</button>
+<button class="period-btn" onclick="loadChart(90,this)">90 дней</button>
+</div>
+<canvas id="chartTrend" height="90"></canvas>
+</div>
+
+<div class="charts-grid-even">
+<div class="card"><h2>По дням недели<span class="hint">средняя выручка за день, 30 дней</span></h2><canvas id="chartWeekday" height="200"></canvas></div>
+<div class="card"><h2>Активность по часам<span class="hint">суммарная выручка, 7 дней</span></h2>
+<div id="hourlyContainer"><canvas id="chartHourly" height="200"></canvas></div>
+</div>
+</div>
+
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let chartTrend = null, chartWeekday = null, chartHourly = null;
+
+async function loadChart(days, btn) {
+  document.querySelectorAll('#appScreen .card .period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  try {
+    const d = await api('/api/chart?days=' + days);
+    const ctx = document.getElementById('chartTrend').getContext('2d');
+    if (chartTrend) chartTrend.destroy();
+    chartTrend = new Chart(ctx, {
+      data: {
+        labels: d.labels,
+        datasets: [
+          { type: 'bar', label: 'Выручка, ₽', data: d.revenue, backgroundColor: 'rgba(79,152,163,0.7)', borderRadius: 4, yAxisID: 'y' },
+          { type: 'line', label: 'Чеки', data: d.orders, borderColor: '#ffc553', backgroundColor: '#ffc553', tension: 0.3, yAxisID: 'y1', pointRadius: 3 },
+        ],
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { labels: { color: '#cdccca' } } },
+        scales: {
+          x: { ticks: { color: '#797876' }, grid: { display: false } },
+          y: { position: 'left', ticks: { color: '#797876' }, grid: { color: '#393836' } },
+          y1: { position: 'right', ticks: { color: '#797876' }, grid: { display: false } },
+        },
+      },
+    });
+  } catch (e) { console.error(e); }
+}
+
+async function loadWeekday() {
+  try {
+    const d = await api('/api/weekday-breakdown?days=30');
+    const ctx = document.getElementById('chartWeekday').getContext('2d');
+    if (chartWeekday) chartWeekday.destroy();
+    chartWeekday = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: d.labels, datasets: [{ label: 'Средняя выручка, ₽', data: d.avgRevenuePerDay, backgroundColor: '#20808d', borderRadius: 6 }] },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876' }, grid: { display: false } }, y: { ticks: { color: '#797876' }, grid: { color: '#393836' } } } },
+    });
+  } catch (e) { console.error(e); }
+}
+
+async function loadHourly() {
+  const container = document.getElementById('hourlyContainer');
+  try {
+    const d = await api('/api/hourly-activity?days=7');
+    if (!d.available) {
+      container.innerHTML = '<div class="unavailable-box">Почасовая аналитика недоступна на этом сервере iiko: ' + (d.error || 'нет поля HourOpen') + '</div>';
+      return;
+    }
+    const hours = d.hours.filter(h => h.revenue > 0 || h.orders > 0);
+    if (!hours.length) { container.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    const ctx = document.getElementById('chartHourly').getContext('2d');
+    if (chartHourly) chartHourly.destroy();
+    chartHourly = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: d.hours.map(h => h.hour + ':00'),
+        datasets: [{ label: 'Выручка, ₽', data: d.hours.map(h => h.revenue), backgroundColor: '#a84b2f', borderRadius: 4 }],
+      },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876', maxRotation: 0 }, grid: { display: false } }, y: { ticks: { color: '#797876' }, grid: { color: '#393836' } } } },
+    });
+  } catch (e) {
+    container.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>';
+  }
+}
+
+function startPage() {
+  loadChart(30);
+  loadWeekday();
+  loadHourly();
+}
+</script>
+</body>
+</html>
