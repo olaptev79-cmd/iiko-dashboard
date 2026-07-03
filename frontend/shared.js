@@ -15,7 +15,19 @@ const PAGES = [
 
 async function api(path, opts = {}) {
   const r = await fetch(API + path, { credentials: 'include', ...opts });
-  if (r.status === 401) { showLogin(); throw new Error('not_authenticated'); }
+  // A 401 from the login endpoint itself means "wrong credentials / iiko
+  // rejected the login", NOT "your session expired" (there is no session
+  // yet at that point). Only treat 401 on OTHER endpoints as an expired
+  // session, otherwise a real login failure gets mislabeled and the actual
+  // reason (from the backend's error message) is hidden from the user.
+  if (r.status === 401) {
+    const body = await r.json().catch(() => ({}));
+    if (path === '/api/auth/login') {
+      throw new Error(body.error || 'Не удалось авторизоваться на сервере iiko');
+    }
+    showLogin();
+    throw new Error('not_authenticated');
+  }
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
     throw new Error(body.error || ('HTTP ' + r.status));
@@ -135,9 +147,7 @@ function bindLoginForm() {
       document.getElementById('fPassword').value = '';
       showApp();
     } catch (err) {
-      errBox.textContent = err.message === 'not_authenticated'
-        ? 'Сессия истекла, попробуйте снова'
-        : (err.message || 'Не удалось подключиться к серверу iiko');
+      errBox.textContent = err.message || 'Не удалось подключиться к серверу iiko';
       errBox.classList.add('visible');
     } finally {
       btn.disabled = false;
