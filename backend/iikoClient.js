@@ -127,6 +127,12 @@ class IikoClient {
       }
     );
     if (res.status >= 200 && res.status < 300) {
+      const rows = res.data && Array.isArray(res.data.data) ? res.data.data.length : "n/a";
+      console.log(
+        "[iiko] OLAP ok. Rows:", rows,
+        "| Filters:", JSON.stringify(body.filters),
+        "| Columns:", res.data && res.data.columnNames
+      );
       return res.data;
     }
     if (res.status === 401 && retry) {
