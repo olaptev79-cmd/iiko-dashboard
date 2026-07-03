@@ -182,16 +182,18 @@ class IikoClient {
     return this.apiGet("employees");
   }
 
-  // iiko v2 OLAP requires dates as "yyyy-MM-dd" or "yyyy-MM-ddTHH:mm:ss.000".
-  // A space-separated "yyyy-MM-dd HH:mm:ss" value is rejected with HTTP 400.
+  // iiko v2 OLAP report filters of type DATE reject any time component —
+  // the server responds with HTTP 409 ("в периоде типа DATE указано время")
+  // if from/to include a time-of-day. Always send plain "yyyy-MM-dd".
   normalizeOlapDate(value) {
     if (!value) return value;
-    const str = String(value).trim();
-    const match = str.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})/);
-    if (match) return `${match[1]}T${match[2]}.000`;
-    return str.slice(0, 10);
+    return String(value).trim().slice(0, 10);
   }
 
+  // Half-open interval: "to" is EXCLUSIVE (the day after the last day
+  // wanted). Callers pass an already-exclusive "to" (see dashboardService's
+  // todayRange/daysRange). includeHigh must be false or iiko rejects
+  // ranges where the computed span looks like a single-point date.
   dateRangeFilter(from, to) {
     return {
       filterType: "DateRange",
@@ -199,7 +201,7 @@ class IikoClient {
       from: this.normalizeOlapDate(from),
       to: this.normalizeOlapDate(to),
       includeLow: true,
-      includeHigh: true,
+      includeHigh: false,
     };
   }
 

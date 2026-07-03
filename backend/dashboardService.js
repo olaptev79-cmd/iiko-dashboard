@@ -1,16 +1,23 @@
 const pad = (n) => String(n).padStart(2, "0");
 const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+// iiko OLAP DATE-type range filters use a half-open interval: "to" is
+// EXCLUSIVE (the day after the last day you want), with includeHigh:false.
+// Sending from === to (or a time-of-day component) is rejected with HTTP 409.
 function todayRange() {
-  const d = fmt(new Date());
-  return { from: d + " 00:00:00", to: d + " 23:59:59", date: d };
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { from: fmt(now), to: fmt(tomorrow), date: fmt(now) };
 }
 
 function daysRange(n) {
   const now = new Date(),
     from = new Date(now);
   from.setDate(from.getDate() - n + 1);
-  return { from: fmt(from) + " 00:00:00", to: fmt(now) + " 23:59:59" };
+  const to = new Date(now);
+  to.setDate(to.getDate() + 1);
+  return { from: fmt(from), to: fmt(to) };
 }
 
 async function getStatus(client, meta) {
