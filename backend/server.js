@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const cookieParser = require("cookie-parser");
 const IikoClient = require("./iikoClient");
 const sessionStore = require("./sessionStore");
@@ -42,8 +43,21 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "100kb" })); // dashboard payloads are small; caps request-body DoS
 app.use(cookieParser());
+
+// ---- Global rate limiting: caps abuse/DoS across the whole API, on top of
+//      the stricter per-IP limit applied to /api/auth/login below. ----
+app.use(
+  "/api/",
+  rateLimit({
+    windowMs: 60 * 1000,
+    max: 120, // generous for normal dashboard polling across 6 pages
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "too_many_requests" },
+  })
+);
 
 app.use((req, _res, next) => {
   // Never log request bodies here — /api/auth/login carries a plaintext
@@ -149,20 +163,30 @@ app.get("/api/auth/me", (req, res) => {
 
 // ---------------- Dashboard routes (require session) ----------------
 
+/** Clamps the `days` query param to a sane range so a client can't force
+ *  an enormous/negative OLAP query (e.g. days=999999999) against the iiko
+ *  server behind this dashboard. */
+function clampDays(raw, fallback) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.min(Math.floor(n), 366);
+}
+
 app.get("/api/health", requireAuth, wrap((r) => svc.getStatus(r.client, r.sessionMeta)));
 app.get("/api/dashboard", requireAuth, wrap((r) => svc.getSummary(r.client)));
-app.get("/api/chart", requireAuth, wrap((r) => svc.getChart(r.client, Number(r.query.days) || 7)));
-app.get("/api/weekday-breakdown", requireAuth, wrap((r) => svc.getWeekdayBreakdown(r.client, Number(r.query.days) || 30)));
-app.get("/api/hourly-activity", requireAuth, wrap((r) => svc.getHourlyActivity(r.client, Number(r.query.days) || 7)));
-app.get("/api/top-dishes", requireAuth, wrap((r) => svc.getTopDishes(r.client, Number(r.query.days) || 7)));
-app.get("/api/menu-analysis", requireAuth, wrap((r) => svc.getMenuAnalysis(r.client, Number(r.query.days) || 30)));
+app.get("/api/chart", requireAuth, wrap((r) => svc.getChart(r.client, clampDays(r.query.days, 7))));
+app.get("/api/weekday-breakdown", requireAuth, wrap((r) => svc.getWeekdayBreakdown(r.client, clampDays(r.query.days, 30))));
+app.get("/api/hourly-activity", requireAuth, wrap((r) => svc.getHourlyActivity(r.client, clampDays(r.query.days, 7))));
+app.get("/api/top-dishes", requireAuth, wrap((r) => svc.getTopDishes(r.client, clampDays(r.query.days, 7))));
+app.get("/api/menu-analysis", requireAuth, wrap((r) => svc.getMenuAnalysis(r.client, clampDays(r.query.days, 30))));
 app.get("/api/departments", requireAuth, wrap((r) => svc.getDepartments(r.client)));
-app.get("/api/branches", requireAuth, wrap((r) => svc.getBranches(r.client, Number(r.query.days) || 30)));
-app.get("/api/payments", requireAuth, wrap((r) => svc.getPayments(r.client, Number(r.query.days) || 30)));
-app.get("/api/order-types", requireAuth, wrap((r) => svc.getOrderTypes(r.client, Number(r.query.days) || 30)));
-app.get("/api/employees/performance", requireAuth, wrap((r) => svc.getEmployeePerformance(r.client, Number(r.query.days) || 30)));
+app.get("/api/branches", requireAuth, wrap((r) => svc.getBranches(r.client, clampDays(r.query.days, 30))));
+app.get("/api/payments", requireAuth, wrap((r) => svc.getPayments(r.client, clampDays(r.query.days, 30))));
+app.get("/api/order-types", requireAuth, wrap((r) => svc.getOrderTypes(r.client, clampDays(r.query.days, 30))));
+app.get("/api/employees/performance", requireAuth, wrap((r) => svc.getEmployeePerformance(r.client, clampDays(r.query.days, 30))));
 app.get("/api/employees/directory", requireAuth, wrap((r) => svc.getEmployeeDirectory(r.client)));
 app.get("/api/forecast", requireAuth, wrap((r) => svc.getForecast(r.client)));
+app.get("/api/warehouse", requireAuth, wrap((r) => svc.getWarehouse(r.client, clampDays(r.query.days, 30))));
 
 // CSV export for the top-dishes report (Excel-friendly, UTF-8 BOM + ;-separated).
 app.get(
@@ -170,7 +194,7 @@ app.get(
   requireAuth,
   async (req, res) => {
     try {
-      const days = Number(req.query.days) || 30;
+      const days = clampDays(req.query.days, 30);
       const data = await svc.getTopDishes(req.client, days);
       const header = "Блюдо;Категория;Количество;Выручка";
       const rows = data.dishes.map((d) => `${csvEscape(d.name)};${csvEscape(d.category)};${d.amount};${d.revenue}`);

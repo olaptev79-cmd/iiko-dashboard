@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Склад — Aqba Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div id="loginScreen">
+  <button class="theme-toggle login-theme-toggle" type="button" aria-label="Переключить тему"></button>
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo">Aqba <span>Dashboard</span></div>
+      <div class="tagline">Аналитика для iikoRMS / iikoServer</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="fServer">Адрес сервера</label>
+        <input id="fServer" type="text" placeholder="mycompany.iiko.it" autocomplete="url" required/>
+        <div class="field-hint">Можно без https:// — добавим автоматически</div>
+      </div>
+      <div class="field">
+        <label for="fLogin">Логин</label>
+        <input id="fLogin" type="text" placeholder="admin" autocomplete="username" required/>
+      </div>
+      <div class="field">
+        <label for="fPassword">Пароль</label>
+        <input id="fPassword" type="password" placeholder="••••••••" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input id="fRemember" type="checkbox" checked/>
+        <label for="fRemember">Запомнить адрес и логин на этом устройстве</label>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div id="appScreen" class="hidden">
+<header>
+  <div class="header-top">
+    <div class="brand">Aqba <span>Dashboard</span></div>
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <nav class="tabs" id="mainNav"></nav>
+</header>
+<div class="container">
+<div class="page-title">Склад и себестоимость</div>
+
+<div class="kpi-grid">
+<div class="kpi"><div class="label">Сумма списаний</div><div class="value" id="kpiWriteoffSum">—</div><div class="sub">рублей, период</div></div>
+<div class="kpi"><div class="label">Себестоимость</div><div class="value" id="kpiCost">—</div><div class="sub">рублей, период</div></div>
+<div class="kpi"><div class="label">Счетов затронуто</div><div class="value" id="kpiAccountsCount">—</div><div class="sub">разных счетов</div></div>
+</div>
+
+<div class="period-btns">
+<button class="period-btn" onclick="loadWarehouse(7,this)">7 дней</button>
+<button class="period-btn active" onclick="loadWarehouse(30,this)">30 дней</button>
+<button class="period-btn" onclick="loadWarehouse(90,this)">90 дней</button>
+</div>
+
+<div class="charts-grid-even">
+<div class="card"><h2>Списания по счетам</h2><div id="accountsChartContainer"><canvas id="chartAccounts" height="220"></canvas></div></div>
+<div class="card"><h2>Топ позиций по сумме списания</h2><div id="itemsTable"><div class="loading">Загрузка...</div></div></div>
+</div>
+
+<div class="card">
+<h2>Таблица по счетам</h2>
+<div id="accountsTable"><div class="loading">Загрузка...</div></div>
+</div>
+
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let chartAccounts = null;
+
+async function loadWarehouse(days, btn) {
+  document.querySelectorAll('#appScreen .period-btns .period-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const chartContainer = document.getElementById('accountsChartContainer');
+  const accountsTableEl = document.getElementById('accountsTable');
+  const itemsTableEl = document.getElementById('itemsTable');
+  try {
+    const d = await api('/api/warehouse?days=' + days);
+    if (!d.available) {
+      chartContainer.innerHTML = '<div class="unavailable-box">Складская аналитика недоступна на этом сервере iiko: ' + esc(d.error || 'нет доступа к отчёту по проводкам') + '</div>';
+      accountsTableEl.innerHTML = '<div class="unavailable-box">Нет данных</div>';
+      itemsTableEl.innerHTML = '<div class="unavailable-box">Нет данных</div>';
+      document.getElementById('kpiWriteoffSum').textContent = '—';
+      document.getElementById('kpiCost').textContent = '—';
+      document.getElementById('kpiAccountsCount').textContent = '—';
+      return;
+    }
+    document.getElementById('kpiWriteoffSum').textContent = fmt(d.totalWriteoffSum);
+    document.getElementById('kpiCost').textContent = fmt(d.totalCost);
+    document.getElementById('kpiAccountsCount').textContent = d.accounts.length;
+
+    if (!d.accounts.length) {
+      chartContainer.innerHTML = '<div class="empty-box">Нет данных за период</div>';
+      accountsTableEl.innerHTML = '<div class="empty-box">Нет данных</div>';
+      itemsTableEl.innerHTML = '<div class="empty-box">Нет данных</div>';
+      return;
+    }
+    if (!document.getElementById('chartAccounts')) {
+      chartContainer.innerHTML = '<canvas id="chartAccounts" height="220"></canvas>';
+    }
+    const ctx = document.getElementById('chartAccounts').getContext('2d');
+    if (chartAccounts) chartAccounts.destroy();
+    const top = d.accounts.slice(0, 8);
+    chartAccounts = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels: top.map(a => a.name), datasets: [{ data: top.map(a => a.sum), backgroundColor: ['#4f98a3','#a84b2f','#1b474d','#bce2e7','#944454','#ffc553','#848456','#6e522b'] }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#cdccca', font: { size: 11 } } } } },
+    });
+
+    accountsTableEl.innerHTML = '<table><thead><tr><th>Счёт</th><th>Сумма, ₽</th><th>Кол-во</th></tr></thead><tbody>' +
+      d.accounts.map(a => `<tr><td>${esc(a.name)}</td><td>${fmt(a.sum)}</td><td>${fmt(a.amount)}</td></tr>`).join('') +
+      '</tbody></table>';
+
+    itemsTableEl.innerHTML = '<table><thead><tr><th>Позиция</th><th>Сумма, ₽</th><th>Кол-во</th></tr></thead><tbody>' +
+      d.items.slice(0, 15).map(i => `<tr><td>${esc(i.name)}</td><td>${fmt(i.sum)}</td><td>${fmt(i.amount)}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) {
+    chartContainer.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>';
+    accountsTableEl.innerHTML = '';
+    itemsTableEl.innerHTML = '';
+  }
+}
+
+function startPage() {
+  loadWarehouse(30);
+}
+</script>
+</body>
+</html>

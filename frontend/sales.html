@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Продажи — Aqba Dashboard</title>
@@ -13,6 +14,7 @@
 <body>
 
 <div id="loginScreen">
+  <button class="theme-toggle login-theme-toggle" type="button" aria-label="Переключить тему"></button>
   <div class="login-card">
     <div class="login-brand">
       <div class="logo">Aqba <span>Dashboard</span></div>
@@ -48,6 +50,7 @@
     <div class="brand">Aqba <span>Dashboard</span></div>
     <div class="header-right">
       <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
       <button class="btn-ghost" id="logoutBtn">Выйти</button>
     </div>
   </div>
@@ -128,7 +131,7 @@ async function loadHourly() {
   try {
     const d = await api('/api/hourly-activity?days=7');
     if (!d.available) {
-      container.innerHTML = '<div class="unavailable-box">Почасовая аналитика недоступна на этом сервере iiko: ' + (d.error || 'нет поля HourOpen') + '</div>';
+      container.innerHTML = '<div class="unavailable-box">Почасовая аналитика недоступна на этом сервере iiko: ' + esc(d.error || 'нет поля HourOpen') + '</div>';
       return;
     }
     const hours = d.hours.filter(h => h.revenue > 0 || h.orders > 0);
@@ -144,7 +147,7 @@ async function loadHourly() {
       options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876', maxRotation: 0 }, grid: { display: false } }, y: { ticks: { color: '#797876' }, grid: { color: '#393836' } } } },
     });
   } catch (e) {
-    container.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>';
+    container.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>';
   }
 }
 

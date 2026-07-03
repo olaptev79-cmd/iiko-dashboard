@@ -425,6 +425,160 @@ async function getForecast(client) {
   };
 }
 
+
+// --- Warehouse / cost analytics (TRANSACTIONS OLAP report) ---
+//
+// Different iiko installs expose different field names on the TRANSACTIONS
+// report, so instead of hardcoding names we discover them dynamically via
+// GET /reports/olap/columns?reportType=TRANSACTIONS, then pick candidates
+// by matching common naming patterns iiko has used across versions. If
+// nothing matches, the feature degrades to { available:false } like every
+// other optional metric in this file.
+let warehouseColumnsCache = null;
+let warehouseColumnsCacheAt = 0;
+const WAREHOUSE_COLUMNS_TTL_MS = 10 * 60 * 1000;
+
+async function getTransactionColumns(client) {
+  const now = Date.now();
+  if (warehouseColumnsCache && now - warehouseColumnsCacheAt < WAREHOUSE_COLUMNS_TTL_MS) {
+    return warehouseColumnsCache;
+  }
+  const raw = await client.getOlapColumns("TRANSACTIONS");
+  // Response shape observed across iiko versions: either a flat object
+  // keyed by field name, or { <FieldName>: { name, type, ... } }.
+  const names = Object.keys(raw || {});
+  warehouseColumnsCache = { raw, names };
+  warehouseColumnsCacheAt = now;
+  return warehouseColumnsCache;
+}
+
+function pickField(names, patterns) {
+  for (const pattern of patterns) {
+    const hit = names.find((n) => pattern.test(n));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** Warehouse write-offs and cost-price analytics via the TRANSACTIONS OLAP
+ *  report. Field names are resolved dynamically per-install; if the
+ *  install doesn't expose the needed fields, returns { available:false }. */
+async function getWarehouse(client, days = 30) {
+  const { from, to } = daysRange(days);
+
+  const colsRes = await safe(() => getTransactionColumns(client));
+  if (!colsRes.ok) {
+    return { available: false, error: colsRes.error, items: [], accounts: [] };
+  }
+  const { names } = colsRes.value;
+
+  const transactionTypeField = pickField(names, [/^TransactionType$/i]);
+  const accountField = pickField(names, [/^Account$/i, /^Account\.Name$/i]);
+  const productField = pickField(names, [
+    /^Product$/i,
+    /^Product\.Name$/i,
+    /^StoreProductArticle\.Name$/i,
+    /^StoreProductArticle$/i,
+  ]);
+  const sumField = pickField(names, [
+    /^Sum$/i,
+    /^Amount\.Sum$/i,
+    /^Sum\.Money$/i,
+    /^TransactionSum$/i,
+  ]);
+  const amountField = pickField(names, [
+    /^Amount$/i,
+    /^Amount\.Amount$/i,
+    /^ProductAmount$/i,
+  ]);
+  const costField = pickField(names, [
+    /^Cost$/i,
+    /^CostPrice$/i,
+    /^Product\.Cost$/i,
+    /^DishCostSum$/i,
+  ]);
+
+  if (!sumField && !costField) {
+    return {
+      available: false,
+      error: "\u0421\u0435\u0440\u0432\u0435\u0440 iiko \u043d\u0435 \u043f\u0440\u0435\u0434\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 \u043f\u043e\u043b\u044f \u0441\u0435\u0431\u0435\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u0438/\u0441\u0443\u043c\u043c\u044b \u0432 \u043e\u0442\u0447\u0451\u0442\u0435 \u043f\u043e \u043f\u0440\u043e\u0432\u043e\u0434\u043a\u0430\u043c",
+      items: [],
+      accounts: [],
+    };
+  }
+
+  const groupByRowFields = [accountField, productField].filter(Boolean);
+  if (transactionTypeField) groupByRowFields.unshift(transactionTypeField);
+  const aggregateFields = [sumField, amountField, costField].filter(Boolean);
+
+  if (!groupByRowFields.length || !aggregateFields.length) {
+    return {
+      available: false,
+      error: "\u041d\u0435\u0434\u043e\u0441\u0442\u0430\u0442\u043e\u0447\u043d\u043e \u043f\u043e\u043b\u0435\u0439 \u0434\u043b\u044f \u043f\u043e\u0441\u0442\u0440\u043e\u0435\u043d\u0438\u044f \u043e\u0442\u0447\u0451\u0442\u0430 \u043f\u043e \u0441\u043a\u043b\u0430\u0434\u0443",
+      items: [],
+      accounts: [],
+    };
+  }
+
+  const extraFilters = {};
+  if (transactionTypeField) {
+    extraFilters[transactionTypeField] = {
+      filterType: "IncludeValues",
+      values: ["WRITEOFF", "WRITE_OFF"],
+    };
+  }
+
+  const reportRes = await safe(() =>
+    client.getOlapTransactions(from, to, groupByRowFields, aggregateFields)
+  );
+  if (!reportRes.ok) {
+    return { available: false, error: reportRes.error, items: [], accounts: [] };
+  }
+
+  const rows = client.parseOlap(reportRes.value);
+  const byAccount = {};
+  const byProduct = {};
+  let totalSum = 0;
+  let totalCost = 0;
+
+  rows.forEach((r) => {
+    const account = accountField ? r[accountField] || "\u041f\u0440\u043e\u0447\u0435\u0435" : "\u0412\u0441\u0435";
+    const product = productField ? r[productField] || "\u041f\u0440\u043e\u0447\u0435\u0435" : "\u0412\u0441\u0435";
+    const sum = sumField ? parseFloat(r[sumField] || 0) : 0;
+    const amount = amountField ? parseFloat(r[amountField] || 0) : 0;
+    const cost = costField ? parseFloat(r[costField] || 0) : sum;
+
+    if (!byAccount[account]) byAccount[account] = { sum: 0, amount: 0 };
+    byAccount[account].sum += sum || cost;
+    byAccount[account].amount += amount;
+
+    if (!byProduct[product]) byProduct[product] = { sum: 0, amount: 0 };
+    byProduct[product].sum += sum || cost;
+    byProduct[product].amount += amount;
+
+    totalSum += sum || 0;
+    totalCost += cost || 0;
+  });
+
+  const accounts = Object.entries(byAccount)
+    .map(([name, v]) => ({ name, sum: +v.sum.toFixed(2), amount: +v.amount.toFixed(2) }))
+    .sort((a, b) => b.sum - a.sum);
+
+  const items = Object.entries(byProduct)
+    .map(([name, v]) => ({ name, sum: +v.sum.toFixed(2), amount: +v.amount.toFixed(2) }))
+    .sort((a, b) => b.sum - a.sum)
+    .slice(0, 50);
+
+  return {
+    available: true,
+    totalWriteoffSum: +totalSum.toFixed(2),
+    totalCost: +(totalCost || totalSum).toFixed(2),
+    accounts,
+    items,
+    source: "live",
+  };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -440,4 +594,5 @@ module.exports = {
   getEmployeePerformance,
   getEmployeeDirectory,
   getForecast,
+  getWarehouse,
 };

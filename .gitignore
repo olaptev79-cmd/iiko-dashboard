@@ -70,7 +70,8 @@ web_modules/
 .env.*
 !.env.example
 
-# persisted session store (contains iiko credentials — never commit)
+# defensive: sessions are in-memory only and never written to disk, but
+# ignore these patterns anyway in case of future local debugging dumps
 backend/data/
 *.sessions.json
 

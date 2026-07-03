@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Сотрудники — Aqba Dashboard</title>
@@ -13,6 +14,7 @@
 <body>
 
 <div id="loginScreen">
+  <button class="theme-toggle login-theme-toggle" type="button" aria-label="Переключить тему"></button>
   <div class="login-card">
     <div class="login-brand">
       <div class="logo">Aqba <span>Dashboard</span></div>
@@ -48,6 +50,7 @@
     <div class="brand">Aqba <span>Dashboard</span></div>
     <div class="header-right">
       <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
       <button class="btn-ghost" id="logoutBtn">Выйти</button>
     </div>
   </div>
@@ -85,13 +88,13 @@ async function loadPerformance(days, btn) {
   try {
     const d = await api('/api/employees/performance?days=' + days);
     if (!d.available) {
-      el.innerHTML = '<div class="unavailable-box">Продажи по сотрудникам недоступны на этом сервере iiko: ' + (d.error || 'нет полей WaiterName/CashierName') + '</div>';
+      el.innerHTML = '<div class="unavailable-box">Продажи по сотрудникам недоступны на этом сервере iiko: ' + esc(d.error || 'нет полей WaiterName/CashierName') + '</div>';
       return;
     }
     if (!d.employees.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
     const top = d.employees.slice(0, 15);
     el.innerHTML = '<canvas id="chartPerf" height="180"></canvas><table style="margin-top:20px;"><thead><tr><th>Сотрудник</th><th>Выручка, ₽</th><th>Чеки</th><th>Средний чек</th></tr></thead><tbody>' +
-      top.map(e => `<tr><td>${e.name}</td><td>${fmt(e.revenue)}</td><td>${fmt(e.orders)}</td><td>${fmt(e.avgCheck)}</td></tr>`).join('') +
+      top.map(e => `<tr><td>${esc(e.name)}</td><td>${fmt(e.revenue)}</td><td>${fmt(e.orders)}</td><td>${fmt(e.avgCheck)}</td></tr>`).join('') +
       '</tbody></table>';
     const ctx = document.getElementById('chartPerf').getContext('2d');
     if (chartPerf) chartPerf.destroy();
@@ -100,7 +103,7 @@ async function loadPerformance(days, btn) {
       data: { labels: top.map(e => e.name), datasets: [{ label: 'Выручка, ₽', data: top.map(e => e.revenue), backgroundColor: '#4f98a3', borderRadius: 4 }] },
       options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876' }, grid: { color: '#393836' } }, y: { ticks: { color: '#cdccca' }, grid: { display: false } } } },
     });
-  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
 async function loadDirectory() {
@@ -108,14 +111,14 @@ async function loadDirectory() {
   try {
     const d = await api('/api/employees/directory');
     if (!d.available) {
-      el.innerHTML = '<div class="unavailable-box">Справочник сотрудников недоступен: ' + (d.error || 'нет доступа к /resto/api/employees') + '</div>';
+      el.innerHTML = '<div class="unavailable-box">Справочник сотрудников недоступен: ' + esc(d.error || 'нет доступа к /resto/api/employees') + '</div>';
       return;
     }
     if (!d.employees.length) { el.innerHTML = '<div class="empty-box">Нет данных</div>'; return; }
     el.innerHTML = '<table><thead><tr><th>Имя</th><th>Роль</th><th>Статус</th></tr></thead><tbody>' +
-      d.employees.map(e => `<tr><td>${e.name}</td><td>${e.role}</td><td>${e.status}</td></tr>`).join('') +
+      d.employees.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.role)}</td><td>${esc(e.status)}</td></tr>`).join('') +
       '</tbody></table>';
-  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
 function startPage() {

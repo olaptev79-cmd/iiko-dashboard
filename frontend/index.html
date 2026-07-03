@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Обзор — Aqba Dashboard</title>
@@ -14,6 +15,7 @@
 
 <!-- ================= LOGIN SCREEN ================= -->
 <div id="loginScreen">
+  <button class="theme-toggle login-theme-toggle" type="button" aria-label="Переключить тему"></button>
   <div class="login-card">
     <div class="login-brand">
       <div class="logo">Aqba <span>Dashboard</span></div>
@@ -50,6 +52,7 @@
     <div class="brand">Aqba <span>Dashboard</span></div>
     <div class="header-right">
       <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
       <button class="btn-ghost" id="logoutBtn">Выйти</button>
     </div>
   </div>
@@ -155,9 +158,9 @@ async function loadDishes() {
     const d = await api('/api/top-dishes?days=1');
     if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Нет продаж сегодня</div>'; return; }
     el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Категория</th><th>Кол-во</th><th>Сумма, ₽</th></tr></thead><tbody>' +
-      d.dishes.slice(0, 10).map((r, i) => `<tr><td>${i + 1}</td><td>${r.name}</td><td>${r.category || '—'}</td><td>${fmt(r.amount)}</td><td>${fmt(r.revenue)}</td></tr>`).join('') +
+      d.dishes.slice(0, 10).map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${esc(r.category || '—')}</td><td>${fmt(r.amount)}</td><td>${fmt(r.revenue)}</td></tr>`).join('') +
       '</tbody></table>';
-  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
 async function loadBranches() {
@@ -167,9 +170,9 @@ async function loadBranches() {
     if (!d.branches.length) { el.innerHTML = '<div class="empty-box">Нет данных</div>'; return; }
     el.innerHTML = d.branches.slice(0, 10).map(b => {
       const cls = deltaClass(b.changePct);
-      return `<div class="branch-item"><div class="branch-name">${b.name}</div><div class="branch-rev">${fmt(b.revenue)} ₽</div><div class="branch-change ${cls}">${deltaArrow(b.changePct)} ${fmtPct(b.changePct)}</div></div>`;
+      return `<div class="branch-item"><div class="branch-name">${esc(b.name)}</div><div class="branch-rev">${fmt(b.revenue)} ₽</div><div class="branch-change ${cls}">${deltaArrow(b.changePct)} ${fmtPct(b.changePct)}</div></div>`;
     }).join('');
-  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
 function startPage() {

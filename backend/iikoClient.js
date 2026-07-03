@@ -1,5 +1,9 @@
 const axios = require("axios");
 const crypto = require("crypto");
+const dns = require("dns").promises;
+const net = require("net");
+const http = require("http");
+const https = require("https");
 
 function sha1(str) {
   return crypto.createHash("sha1").update(str).digest("hex");
@@ -13,16 +17,100 @@ function normalizeUrl(raw) {
   return url;
 }
 
+/**
+ * SSRF guard: the iiko server URL is entirely user-supplied, so without
+ * validation a malicious/careless user could point this backend at
+ * internal infrastructure (localhost, private RFC1918 ranges, link-local
+ * cloud metadata endpoints like 169.254.169.254, etc.) and use it as a
+ * blind request proxy. We resolve the hostname to its actual IP(s) and
+ * reject anything private/loopback/link-local/reserved before any
+ * request is made — this also defeats DNS-rebinding since axios reuses
+ * this same resolution behaviour is not guaranteed, so callers should
+ * treat this as a best-effort gate at connection time, re-checked on
+ * every new client (i.e. every login).
+ */
+function isDisallowedIp(ip) {
+  const type = net.isIP(ip);
+  if (!type) return true; // not a valid IP at all — reject
+  if (type === 4) {
+    const parts = ip.split(".").map(Number);
+    const [a, b] = parts;
+    if (a === 127) return true; // loopback
+    if (a === 10) return true; // private
+    if (a === 172 && b >= 16 && b <= 31) return true; // private
+    if (a === 192 && b === 168) return true; // private
+    if (a === 169 && b === 254) return true; // link-local / cloud metadata
+    if (a === 0) return true; // "this network"
+    if (a >= 224) return true; // multicast/reserved
+    return false;
+  }
+  // IPv6
+  const lower = ip.toLowerCase();
+  if (lower === "::1") return true; // loopback
+  if (lower.startsWith("fe80:")) return true; // link-local
+  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local
+  if (lower.startsWith("::ffff:")) {
+    // IPv4-mapped IPv6 — check the embedded IPv4 address too
+    return isDisallowedIp(lower.replace("::ffff:", ""));
+  }
+  return false;
+}
+
+/** Fast, synchronous pre-check for the obvious case, done before any DNS
+ *  lookup or network call — the http(s) Agent's `lookup` override (wired
+ *  up in the constructor below) is the real enforcement point that covers
+ *  every request and every hostname, including DNS-rebinding attempts. */
+function rejectObviousLocalHost(baseUrl) {
+  let hostname;
+  try {
+    hostname = new URL(baseUrl).hostname;
+  } catch {
+    throw new Error("Некорректный адрес сервера iiko");
+  }
+  if (!hostname) throw new Error("Некорректный адрес сервера iiko");
+  if (hostname === "localhost" || hostname === "0.0.0.0") {
+    throw new Error("Адрес сервера не может указывать на localhost");
+  }
+  if (net.isIP(hostname) && isDisallowedIp(hostname)) {
+    throw new Error("Адрес сервера указывает на запрещённый/внутренний IP");
+  }
+}
+
 class IikoClient {
   constructor(baseUrl, login, password) {
     this.baseUrl = normalizeUrl(baseUrl);
+    rejectObviousLocalHost(this.baseUrl);
     this.login = login;
     this.password = password;
     this.token = null;
     this.tokenExpiry = null;
+    // SSRF hardening: force every single TCP connection this client ever
+    // makes to go through our own DNS lookup, which rejects private/
+    // loopback/link-local/reserved IPs. Passed via the http(s) Agent's own
+    // `lookup` option (the actual Node knob for this), not axios directly.
+    // This closes the DNS-rebinding gap that a one-time check-then-connect
+    // validation would leave open (the attacker's DNS could resolve to a
+    // safe IP during the initial check and to an internal IP a moment
+    // later, at actual connection time).
+    const safeLookup = (hostname, options, callback) => {
+      dns
+        .lookup(hostname, { all: true, verbatim: true })
+        .then((records) => {
+          const bad = records.find((r) => isDisallowedIp(r.address));
+          if (bad || !records.length) {
+            callback(new Error("Запрос к внутреннему/запрещённому адресу заблокирован"));
+            return;
+          }
+          const pick = records[0];
+          callback(null, pick.address, pick.family);
+        })
+        .catch((e) => callback(e));
+    };
     this.http = axios.create({
       timeout: 15000,
       validateStatus: () => true,
+      httpAgent: new http.Agent({ lookup: safeLookup }),
+      httpsAgent: new https.Agent({ lookup: safeLookup }),
     });
   }
 
@@ -298,6 +386,42 @@ class IikoClient {
       aggregateFields: ["DishAmountInt", "DishSumInt", "UniqOrderId"],
       filters: {
         "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
+  /** Fetches the list of fields available for a given OLAP report type
+   *  (e.g. "TRANSACTIONS"), including their name/type/grouping/aggregation
+   *  capability. Different iiko installs/versions expose different field
+   *  sets for the transactions report, so callers should discover field
+   *  names dynamically via this method instead of hardcoding them. */
+  async getOlapColumns(reportType) {
+    const key = await this.getToken();
+    const res = await this.http.get(`${this.baseUrl}/resto/api/v2/reports/olap/columns`, {
+      params: { key, reportType },
+      timeout: 20000,
+    });
+    if (res.status >= 200 && res.status < 300) {
+      return res.data;
+    }
+    throw new Error(
+      `GET /resto/api/v2/reports/olap/columns failed with status ${res.status}: ${this.describeError(res.data)}`
+    );
+  }
+
+  /** Generic escape hatch for the TRANSACTIONS (проводки) OLAP report —
+   *  used for warehouse/write-off/cost-price analytics. Field names vary
+   *  by iiko install, so the caller (dashboardService) discovers them via
+   *  getOlapColumns() first and passes the resolved field names in. */
+  async getOlapTransactions(from, to, groupByRowFields, aggregateFields, extraFilters = {}) {
+    return this.olapPost({
+      reportType: "TRANSACTIONS",
+      buildSummary: true,
+      groupByRowFields,
+      aggregateFields,
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+        ...extraFilters,
       },
     });
   }

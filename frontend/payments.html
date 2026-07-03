@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Оплаты — Aqba Dashboard</title>
@@ -13,6 +14,7 @@
 <body>
 
 <div id="loginScreen">
+  <button class="theme-toggle login-theme-toggle" type="button" aria-label="Переключить тему"></button>
   <div class="login-card">
     <div class="login-brand">
       <div class="logo">Aqba <span>Dashboard</span></div>
@@ -48,6 +50,7 @@
     <div class="brand">Aqba <span>Dashboard</span></div>
     <div class="header-right">
       <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
       <button class="btn-ghost" id="logoutBtn">Выйти</button>
     </div>
   </div>
@@ -93,7 +96,7 @@ async function loadPayments(days, btn) {
   try {
     const d = await api('/api/payments?days=' + days);
     if (!d.available) {
-      chartContainer.innerHTML = '<div class="unavailable-box">Разбивка по типам оплаты недоступна на этом сервере iiko: ' + (d.error || 'нет поля PayTypes') + '</div>';
+      chartContainer.innerHTML = '<div class="unavailable-box">Разбивка по типам оплаты недоступна на этом сервере iiko: ' + esc(d.error || 'нет поля PayTypes') + '</div>';
       tableEl.innerHTML = '<div class="unavailable-box">Нет данных</div>';
       document.getElementById('kpiPayRevenue').textContent = '—';
       document.getElementById('kpiDiscount').textContent = '—';
@@ -121,10 +124,10 @@ async function loadPayments(days, btn) {
     });
 
     tableEl.innerHTML = '<table><thead><tr><th>Тип оплаты</th><th>Выручка, ₽</th><th>Кол-во</th><th>Доля</th></tr></thead><tbody>' +
-      d.payTypes.map(p => `<tr><td>${p.name}</td><td>${fmt(p.revenue)}</td><td>${fmt(p.amount)}</td><td>${p.share}%</td></tr>`).join('') +
+      d.payTypes.map(p => `<tr><td>${esc(p.name)}</td><td>${fmt(p.revenue)}</td><td>${fmt(p.amount)}</td><td>${p.share}%</td></tr>`).join('') +
       '</tbody></table>';
   } catch (e) {
-    chartContainer.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>';
+    chartContainer.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>';
     tableEl.innerHTML = '';
   }
 }
@@ -134,14 +137,14 @@ async function loadOrderTypes(days = 30) {
   try {
     const d = await api('/api/order-types?days=' + days);
     if (!d.available) {
-      el.innerHTML = '<div class="unavailable-box">Типы заказов недоступны на этом сервере iiko: ' + (d.error || 'нет поля OrderType') + '</div>';
+      el.innerHTML = '<div class="unavailable-box">Типы заказов недоступны на этом сервере iiko: ' + esc(d.error || 'нет поля OrderType') + '</div>';
       return;
     }
     if (!d.types.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
     el.innerHTML = '<table><thead><tr><th>Тип заказа</th><th>Выручка, ₽</th><th>Кол-во</th></tr></thead><tbody>' +
-      d.types.map(t => `<tr><td>${t.name}</td><td>${fmt(t.revenue)}</td><td>${fmt(t.orders)}</td></tr>`).join('') +
+      d.types.map(t => `<tr><td>${esc(t.name)}</td><td>${fmt(t.revenue)}</td><td>${fmt(t.orders)}</td></tr>`).join('') +
       '</tbody></table>';
-  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + e.message + '</div>'; }
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
 function startPage() {

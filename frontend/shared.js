@@ -1,6 +1,7 @@
 // Shared across all pages: API client, auth/login flow, header + nav rendering.
 const API = window.location.hostname === 'localhost' && window.location.port === '3000' ? 'http://localhost:3001' : '';
 const LS_KEY = 'aqba_login_prefs';
+const THEME_KEY = 'aqba_theme';
 
 const PAGES = [
   { href: 'index.html', label: 'Обзор' },
@@ -9,6 +10,7 @@ const PAGES = [
   { href: 'branches.html', label: 'Филиалы' },
   { href: 'payments.html', label: 'Оплаты' },
   { href: 'employees.html', label: 'Сотрудники' },
+  { href: 'warehouse.html', label: 'Склад' },
 ];
 
 async function api(path, opts = {}) {
@@ -19,6 +21,47 @@ async function api(path, opts = {}) {
     throw new Error(body.error || ('HTTP ' + r.status));
   }
   return r.json();
+}
+
+// XSS guard: every string that ultimately comes from the iiko server (dish
+// names, categories, department/branch names, employee names, etc.) must be
+// escaped before being inserted via innerHTML/template strings, since iiko
+// data is technically attacker-controllable (anyone who can rename a dish
+// or an employee in iiko could otherwise inject markup/script here).
+function esc(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ---------------- Theme (light/dark) ----------------
+// The actual initial theme class is applied synchronously by an inline
+// script in <head> (before shared.js loads) to avoid a flash of the wrong
+// theme. This section just wires up the toggle button(s) and keeps
+// localStorage in sync.
+function getTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  document.querySelectorAll('.theme-toggle').forEach(btn => {
+    btn.textContent = theme === 'light' ? '🌙' : '☀️';
+    btn.title = theme === 'light' ? 'Включить тёмную тему' : 'Включить светлую тему';
+  });
+}
+function toggleTheme() {
+  const next = getTheme() === 'light' ? 'dark' : 'light';
+  try { localStorage.setItem(THEME_KEY, next); } catch {}
+  applyTheme(next);
+}
+function bindThemeToggles() {
+  document.querySelectorAll('.theme-toggle').forEach(btn => {
+    btn.addEventListener('click', toggleTheme);
+  });
+  applyTheme(getTheme());
 }
 
 function fmt(n) { return Number(n || 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 }); }
@@ -152,6 +195,7 @@ function downloadCsv(path, filename) {
 
 // ---------------- Boot (shared across pages) ----------------
 async function bootShared() {
+  bindThemeToggles();
   loadSavedPrefs();
   bindLoginForm();
   bindLogout();
