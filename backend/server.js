@@ -11,7 +11,16 @@ const svc = require("./dashboardService");
 const app = express();
 const PORT = process.env.PORT || 3001;
 const COOKIE_NAME = "aqba_sid";
-const IS_PROD = process.env.NODE_ENV === "production";
+// The `Secure` cookie flag must match how the app is actually served, not
+// just NODE_ENV: browsers silently drop Secure cookies on every request
+// that isn't HTTPS. Most self-hosted deployments (Docker on a LAN, a bare
+// server IP, etc.) run in NODE_ENV=production over plain HTTP, and tying
+// Secure to IS_PROD there breaks every session on the very next page
+// navigation (login "works", then immediately bounces back to the login
+// screen, which also makes the sidebar/nav disappear). COOKIE_SECURE lets
+// an operator opt in explicitly once the app sits behind HTTPS; it
+// defaults to false so the common plain-HTTP case works out of the box.
+const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
 
 // Comma-separated list of allowed origins in production, e.g.
 // ALLOWED_ORIGINS=https://dashboard.example.com,https://www.example.com
@@ -89,7 +98,7 @@ function setSessionCookie(res, sid) {
   res.cookie(COOKIE_NAME, sid, {
     httpOnly: true,
     sameSite: "lax",
-    secure: IS_PROD,
+    secure: COOKIE_SECURE,
     maxAge: 8 * 60 * 60 * 1000,
   });
 }
