@@ -637,28 +637,41 @@ async function getWarehouse(client, days = 30) {
     };
   }
 
-  const extraFilters = {};
-  if (transactionTypeField) {
-    extraFilters[transactionTypeField] = {
-      filterType: "IncludeValues",
-      values: ["WRITEOFF", "WRITE_OFF"],
-    };
-  }
-
+  // NOTE: filtering server-side by TransactionType value (e.g.
+  // "WRITEOFF"/"WRITE_OFF") is NOT safe — TransactionType is a Java enum
+  // on the iiko backend (resto.back.accounting.TransactionType) whose exact
+  // constant names vary by install/version (confirmed: this install rejects
+  // "WRITE_OFF" with "No enum constant ... TransactionType.WRITE_OFF"), and
+  // we have no reliable way to discover the valid enum values ahead of time.
+  // So instead of sending an IncludeValues filter, ALL transactions are
+  // fetched for the period and the write-off subset is matched client-side
+  // (case-insensitive substring match against common write-off wording),
+  // which degrades gracefully to "show all" if the value doesn't look like
+  // a recognizable write-off label.
   const reportRes = await safe(() =>
-    client.getOlapTransactions(from, to, groupByRowFields, aggregateFields, dateField, extraFilters)
+    client.getOlapTransactions(from, to, groupByRowFields, aggregateFields, dateField, {})
   );
   if (!reportRes.ok) {
     return { available: false, error: reportRes.error, items: [], accounts: [] };
   }
 
-  const rows = client.parseOlap(reportRes.value);
+  const WRITEOFF_LABEL_PATTERN = /writeoff|write.off|\u0441\u043f\u0438\u0441\u0430\u043d/i;
+  let allRows = client.parseOlap(reportRes.value);
+  const rows = transactionTypeField
+    ? allRows.filter((r) => WRITEOFF_LABEL_PATTERN.test(String(r[transactionTypeField] || "")))
+    : allRows;
+  // If filtering by the recognizable write-off wording eliminated everything
+  // (e.g. this install labels write-offs completely differently), fall back
+  // to showing all transactions for the period rather than an empty report —
+  // still more useful than nothing, and the account/product breakdown below
+  // still reflects real activity even if it isn't purely write-offs.
+  const effectiveRows = transactionTypeField && rows.length === 0 && allRows.length > 0 ? allRows : rows;
   const byAccount = {};
   const byProduct = {};
   let totalSum = 0;
   let totalCost = 0;
 
-  rows.forEach((r) => {
+  effectiveRows.forEach((r) => {
     const account = accountField ? r[accountField] || "\u041f\u0440\u043e\u0447\u0435\u0435" : "\u0412\u0441\u0435";
     const product = productField ? r[productField] || "\u041f\u0440\u043e\u0447\u0435\u0435" : "\u0412\u0441\u0435";
     const sum = sumField ? parseFloat(r[sumField] || 0) : 0;
@@ -692,6 +705,11 @@ async function getWarehouse(client, days = 30) {
     totalCost: +(totalCost || totalSum).toFixed(2),
     accounts,
     items,
+    // true = confidently showing only write-off transactions; false = this
+    // install's TransactionType values didn't match recognizable write-off
+    // wording, so ALL transactions for the period are shown instead (still
+    // useful, but the numbers include non-write-off activity too).
+    filteredToWriteoffs: effectiveRows === rows && !!transactionTypeField && rows.length > 0,
     source: "live",
   };
 }

@@ -9,6 +9,8 @@ async function loadWarehouse(days, btn) {
   const itemsTableEl = document.getElementById('itemsTable');
   try {
     const d = await api('/api/warehouse?days=' + days);
+    const warningEl = document.getElementById('warehouseWarning');
+    if (warningEl) warningEl.innerHTML = '';
     if (!d.available) {
       chartContainer.innerHTML = '<div class="unavailable-box">Складская аналитика недоступна на этом сервере iiko: ' + esc(d.error || 'нет доступа к отчёту по проводкам') + '</div>';
       accountsTableEl.innerHTML = '<div class="unavailable-box">Нет данных</div>';
@@ -21,6 +23,10 @@ async function loadWarehouse(days, btn) {
     document.getElementById('kpiWriteoffSum').textContent = fmt(d.totalWriteoffSum);
     document.getElementById('kpiCost').textContent = fmt(d.totalCost);
     document.getElementById('kpiAccountsCount').textContent = d.accounts.length;
+
+    if (warningEl && d.filteredToWriteoffs === false) {
+      warningEl.innerHTML = '<div class="unavailable-box">Сервер iiko не позволяет отфильтровать именно списания — показаны все проводки по складу за период.</div>';
+    }
 
     if (!d.accounts.length) {
       chartContainer.innerHTML = '<div class="empty-box">Нет данных за период</div>';
