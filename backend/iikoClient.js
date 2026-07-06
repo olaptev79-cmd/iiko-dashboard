@@ -389,12 +389,17 @@ class IikoClient {
     });
   }
 
-  /** Sales grouped by waiter/cashier for a basic employee performance view. */
-  async getOlapByEmployee(from, to) {
+  /** Sales grouped by waiter/cashier for a basic employee performance view.
+   *  Field names for "who served this" vary by iiko install (WaiterName /
+   *  CashierName aren't guaranteed to exist), so the caller
+   *  (dashboardService) resolves them dynamically via getOlapColumns("SALES")
+   *  and passes the resolved field names in — same pattern as
+   *  getOlapTransactions() below. */
+  async getOlapByEmployee(from, to, groupByRowFields) {
     return this.olapPost({
       reportType: "SALES",
       buildSummary: true,
-      groupByRowFields: ["WaiterName", "CashierName"],
+      groupByRowFields,
       aggregateFields: ["DishAmountInt", "DishSumInt", "UniqOrderId"],
       filters: {
         "OpenDate.Typed": this.dateRangeFilter(from, to),

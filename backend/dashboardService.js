@@ -362,15 +362,46 @@ async function getOrderTypes(client, days = 30) {
   };
 }
 
-/** Employee (waiter/cashier) performance ranking, if supported by this iiko install. */
+// Field-name patterns for "who served this" (waiter/cashier). Field names
+// vary a lot across iiko versions/installs — WaiterName/CashierName are NOT
+// guaranteed to exist as literal field names (confirmed: one install rejects
+// "CashierName" outright with HTTP 400 "Unknown OLAP field"). Shared by
+// getEmployeePerformance() and getRiskyOperations(), both of which resolve
+// the actual field dynamically via getSalesColumns() + pickField().
+const WAITER_FIELD_PATTERNS = [/^WaiterName$/i, /^Waiter\.Name$/i, /^Waiter$/i, /^OrderWaiter\.Name$/i];
+const CASHIER_FIELD_PATTERNS = [/^CashierName$/i, /^Cashier\.Name$/i, /^Cashier$/i, /^OrderCashier\.Name$/i];
+
+/** Employee (waiter/cashier) performance ranking, if supported by this iiko
+ *  install. Field names for "who served this" vary a lot across iiko
+ *  versions (WaiterName/CashierName aren't guaranteed to exist as literal
+ *  field names), so they're resolved dynamically via getSalesColumns() +
+ *  pickField() instead of being hardcoded. */
 async function getEmployeePerformance(client, days = 30) {
   const { from, to } = daysRange(days);
-  const res = await safe(() => client.getOlapByEmployee(from, to));
+
+  const colsRes = await safe(() => getSalesColumns(client));
+  if (!colsRes.ok) return { available: false, error: colsRes.error, employees: [] };
+  const { names } = colsRes.value;
+
+  const waiterField = pickField(names, WAITER_FIELD_PATTERNS);
+  const cashierField = pickField(names, CASHIER_FIELD_PATTERNS);
+
+  const employeeFields = [waiterField, cashierField].filter(Boolean);
+  if (!employeeFields.length) {
+    return {
+      available: false,
+      error:
+        "\u0421\u0435\u0440\u0432\u0435\u0440 iiko \u043d\u0435 \u043f\u0440\u0435\u0434\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 \u043f\u043e\u043b\u0435 \u043e\u0444\u0438\u0446\u0438\u0430\u043d\u0442\u0430/\u043a\u0430\u0441\u0441\u0438\u0440\u0430 \u0432 \u043e\u0442\u0447\u0451\u0442\u0435 \u043f\u043e \u043f\u0440\u043e\u0434\u0430\u0436\u0430\u043c",
+      employees: [],
+    };
+  }
+
+  const res = await safe(() => client.getOlapByEmployee(from, to, employeeFields));
   if (!res.ok) return { available: false, error: res.error, employees: [] };
   const byName = {};
   client.parseOlap(res.value).forEach((r) => {
-    const name = r["WaiterName"] || r["CashierName"] || "Не указано";
-    if (name === "Не указано" && !r["WaiterName"] && !r["CashierName"]) return;
+    const name = (waiterField && r[waiterField]) || (cashierField && r[cashierField]) || "Не указано";
+    if (name === "Не указано" && !(waiterField && r[waiterField]) && !(cashierField && r[cashierField])) return;
     if (!byName[name]) byName[name] = { revenue: 0, orders: 0 };
     byName[name].revenue += parseFloat(r["DishSumInt"] || 0);
     byName[name].orders += parseInt(r["DishAmountInt"] || 0, 10);
@@ -491,30 +522,71 @@ async function getWarehouse(client, days = 30) {
   }
   const { names } = colsRes.value;
 
-  const transactionTypeField = pickField(names, [/^TransactionType$/i]);
-  const accountField = pickField(names, [/^Account$/i, /^Account\.Name$/i]);
+  const transactionTypeField = pickField(names, [
+    /^TransactionType$/i,
+    /^Transaction\.Type$/i,
+    /^Type$/i,
+    /^DocumentType$/i,
+  ]);
+  const accountField = pickField(names, [
+    /^Account$/i,
+    /^Account\.Name$/i,
+    /^Store$/i,
+    /^Store\.Name$/i,
+    /^Department\.Name$/i,
+    /^Account\.Id$/i,
+  ]);
   const productField = pickField(names, [
     /^Product$/i,
     /^Product\.Name$/i,
     /^StoreProductArticle\.Name$/i,
     /^StoreProductArticle$/i,
+    /^ProductName$/i,
+    /^DishName$/i,
+    /^Good\.Name$/i,
+    /^Good$/i,
+    /^Item\.Name$/i,
+    /^Nomenclature\.Name$/i,
   ]);
+  // Broadened (best-effort) beyond the original anchored-exact patterns: iiko
+  // installs have been observed to use many variants for the write-off
+  // money amount. Kept in priority order (most-specific/likely first), with
+  // looser, unanchored fallbacks (e.g. /Sum$/i, /CostSum/i) added last so an
+  // exact/more-specific match is always preferred when both exist.
   const sumField = pickField(names, [
     /^Sum$/i,
     /^Amount\.Sum$/i,
     /^Sum\.Money$/i,
     /^TransactionSum$/i,
+    /^WriteoffSum$/i,
+    /^Writeoff\.Sum$/i,
+    /^SumWithoutVAT$/i,
+    /^Sum\.Sum$/i,
+    /^Amount\.Money$/i,
+    /WriteoffSum/i,
+    /TransactionSum/i,
+    /Sum$/i,
   ]);
   const amountField = pickField(names, [
     /^Amount$/i,
     /^Amount\.Amount$/i,
     /^ProductAmount$/i,
+    /^Amount\.Number$/i,
+    /^Num$/i,
+    /^Quantity$/i,
+    /Amount$/i,
   ]);
   const costField = pickField(names, [
     /^Cost$/i,
     /^CostPrice$/i,
     /^Product\.Cost$/i,
     /^DishCostSum$/i,
+    /^Cost\.Cost$/i,
+    /^CostSum$/i,
+    /^Cost\.Sum$/i,
+    /^SumCost$/i,
+    /CostSum/i,
+    /Cost$/i,
   ]);
 
   if (!sumField && !costField) {
@@ -601,15 +673,16 @@ async function getWarehouse(client, days = 30) {
 // --- Risky ("dangerous") register operations — discounts, deletions,
 // refunds, voided/cancelled checks — surfaced via the SALES OLAP report.
 //
-// Exact field names for deletion/refund/discount markers vary across iiko
-// versions/installs, so (mirroring getWarehouse() above) they are resolved
-// dynamically via getSalesColumns() + pickField() rather than hardcoded,
-// with the exception of fields already CONFIRMED working elsewhere in this
-// file for this exact install (DeletedWithWriteoff, DishDiscountSumInt,
-// WaiterName, CashierName, OrderType, OpenDate.Typed, HourOpen, DishName,
-// UniqOrderId) — those are used directly, and only genuinely new fields
-// (order-deleted flag, check-refund flag, discount name/percent, deletion
-// comment) go through dynamic discovery.
+// Exact field names for deletion/refund/discount/waiter/cashier markers vary
+// across iiko versions/installs, so ALL of them (mirroring getWarehouse()
+// above) are resolved dynamically via getSalesColumns() + pickField() rather
+// than hardcoded. Earlier revisions of this feature assumed WaiterName/
+// CashierName were confirmed-working literal field names — that assumption
+// was wrong (this install rejects "CashierName" with HTTP 400 "Unknown OLAP
+// field"), so those two are now resolved the same way as everything else.
+// Only fields that are structurally guaranteed by the SALES report itself
+// (date/hour/order id/dish name/sum, used elsewhere in this file without
+// issue) remain as literals.
 const DISCOUNT_PERCENT_THRESHOLD = 15; // manual discounts at/above this % are flagged "risky"
 
 async function getRiskyOperations(client, days = 30) {
@@ -621,11 +694,11 @@ async function getRiskyOperations(client, days = 30) {
   }
   const { names } = colsRes.value;
 
-  // Confirmed-working fields on this codebase's target install (used as-is).
+  // Fields used directly — structurally standard SALES report fields,
+  // already relied upon elsewhere in this file (getSummary/getChart/etc.)
+  // without issue on this install.
   const DELETED_WITH_WRITEOFF = "DeletedWithWriteoff";
   const DISCOUNT_SUM = "DishDiscountSumInt";
-  const WAITER = "WaiterName";
-  const CASHIER = "CashierName";
   const ORDER_TYPE = "OrderType";
   const DATE_FIELD = "OpenDate.Typed";
   const HOUR_FIELD = "HourOpen";
@@ -636,6 +709,8 @@ async function getRiskyOperations(client, days = 30) {
   // Dynamically-discovered fields — not confirmed on every install, so we
   // fall back gracefully (a field that isn't found is simply omitted from
   // groupByRowFields and its signal is skipped when classifying events).
+  const waiterField = pickField(names, WAITER_FIELD_PATTERNS);
+  const cashierField = pickField(names, CASHIER_FIELD_PATTERNS);
   const orderDeletedField = pickField(names, [/^OrderDeleted$/i, /^Order\.Deleted$/i]);
   const checkRefundField = pickField(names, [/^StornoReason$/i, /^Storno$/i, /^IsReturn$/i, /^ReturnedSum$/i]);
   const discountNameField = pickField(names, [/^DiscountName$/i, /^Discounts\.Name$/i, /^Discount$/i]);
@@ -646,8 +721,8 @@ async function getRiskyOperations(client, days = 30) {
   const groupByRowFields = [
     DATE_FIELD,
     HOUR_FIELD,
-    WAITER,
-    CASHIER,
+    waiterField,
+    cashierField,
     ORDER_ID,
     DISH_NAME,
     DELETED_WITH_WRITEOFF,
@@ -704,7 +779,7 @@ async function getRiskyOperations(client, days = 30) {
 
     if (!reasons.length) return;
 
-    const employee = r[WAITER] || r[CASHIER] || "Не указано";
+    const employee = (waiterField && r[waiterField]) || (cashierField && r[cashierField]) || "Не указано";
     const date = r[DATE_FIELD] || null;
     const hour = r[HOUR_FIELD] != null ? r[HOUR_FIELD] : null;
 
@@ -759,6 +834,8 @@ async function getRiskyOperations(client, days = 30) {
       .sort((a, b) => b.total - a.total),
     totals,
     fieldsDetected: {
+      waiter: !!waiterField,
+      cashier: !!cashierField,
       orderDeleted: !!orderDeletedField,
       refund: !!checkRefundField,
       discountName: !!discountNameField,
