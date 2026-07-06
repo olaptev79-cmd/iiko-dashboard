@@ -60,7 +60,7 @@ function renderTimeline() {
       <td>${e.hour != null ? esc(e.hour) + ':00' : '—'}</td>
       <td>${esc(e.employee)}</td>
       <td>${riskyBadge(e.type)}</td>
-      <td>${esc(e.dish || (e.orderId ? 'Заказ ' + e.orderId : '—'))}${e.discountName ? ' · ' + esc(e.discountName) : ''}</td>
+      <td>${esc(e.dish || '—')}${e.discountName ? ' · ' + esc(e.discountName) : ''}</td>
       <td>${fmt(e.discountSum || e.sum)}</td>
     </tr>`).join('') +
     '</tbody></table>';

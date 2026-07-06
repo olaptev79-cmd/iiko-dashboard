@@ -522,6 +522,23 @@ async function getWarehouse(client, days = 30) {
   }
   const { names } = colsRes.value;
 
+  // Unlike SALES, TRANSACTIONS may not expose "OpenDate.Typed" at all
+  // (confirmed: rejected with "Unknown OLAP field 'OpenDate.Typed'" on one
+  // install) — resolve the date field dynamically per-install instead of
+  // hardcoding it, mirroring every other field in this function.
+  const dateField = pickField(names, [
+    /^OpenDate\.Typed$/i,
+    /^Date\.Typed$/i,
+    /^Date$/i,
+    /^TransactionDate$/i,
+    /^Transaction\.Date$/i,
+    /^DateTime\.Typed$/i,
+    /^DocumentDate$/i,
+    /^CloseDate\.Typed$/i,
+    /Date\.Typed$/i,
+    /Date$/i,
+  ]);
+
   const transactionTypeField = pickField(names, [
     /^TransactionType$/i,
     /^Transaction\.Type$/i,
@@ -598,6 +615,15 @@ async function getWarehouse(client, days = 30) {
     };
   }
 
+  if (!dateField) {
+    return {
+      available: false,
+      error: "\u0421\u0435\u0440\u0432\u0435\u0440 iiko \u043d\u0435 \u043f\u0440\u0435\u0434\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 \u043f\u043e\u043b\u0435 \u0434\u0430\u0442\u044b \u0432 \u043e\u0442\u0447\u0451\u0442\u0435 \u043f\u043e \u043f\u0440\u043e\u0432\u043e\u0434\u043a\u0430\u043c",
+      items: [],
+      accounts: [],
+    };
+  }
+
   const groupByRowFields = [accountField, productField].filter(Boolean);
   if (transactionTypeField) groupByRowFields.unshift(transactionTypeField);
   const aggregateFields = [sumField, amountField, costField].filter(Boolean);
@@ -620,7 +646,7 @@ async function getWarehouse(client, days = 30) {
   }
 
   const reportRes = await safe(() =>
-    client.getOlapTransactions(from, to, groupByRowFields, aggregateFields)
+    client.getOlapTransactions(from, to, groupByRowFields, aggregateFields, dateField, extraFilters)
   );
   if (!reportRes.ok) {
     return { available: false, error: reportRes.error, items: [], accounts: [] };
@@ -703,7 +729,6 @@ async function getRiskyOperations(client, days = 30) {
   const DATE_FIELD = "OpenDate.Typed";
   const HOUR_FIELD = "HourOpen";
   const DISH_NAME = "DishName";
-  const ORDER_ID = "UniqOrderId";
   const DISH_SUM = "DishSumInt";
 
   // Dynamically-discovered fields — not confirmed on every install, so we
@@ -718,12 +743,18 @@ async function getRiskyOperations(client, days = 30) {
   const deletionCommentField = pickField(names, [/DeletionComment/i, /DeleteComment/i, /RemovalComment/i]);
   const payTypesField = pickField(names, [/^PayTypes$/i]);
 
+  // NOTE: UniqOrderId is NOT allowed in groupByRowFields on this install
+  // ("Grouping is not allowed for field 'UniqOrderId'") — iiko treats it as
+  // an aggregate-only/summary field, not a groupable dimension there either
+  // (aggregating it would return a meaningless SUM of order ids, not an
+  // actual order id to display/link). So it's dropped entirely rather than
+  // moved to aggregateFields — events fall back to dish name / employee /
+  // date instead of a per-event order id (see events.push() below).
   const groupByRowFields = [
     DATE_FIELD,
     HOUR_FIELD,
     waiterField,
     cashierField,
-    ORDER_ID,
     DISH_NAME,
     DELETED_WITH_WRITEOFF,
     ORDER_TYPE,
@@ -790,7 +821,6 @@ async function getRiskyOperations(client, days = 30) {
         date,
         hour,
         employee,
-        orderId: r[ORDER_ID] || null,
         dish: r[DISH_NAME] || null,
         discountName: discountNameField ? r[discountNameField] || null : null,
         discountPercent,

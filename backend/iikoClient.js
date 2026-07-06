@@ -446,15 +446,19 @@ class IikoClient {
   /** Generic escape hatch for the TRANSACTIONS (проводки) OLAP report —
    *  used for warehouse/write-off/cost-price analytics. Field names vary
    *  by iiko install, so the caller (dashboardService) discovers them via
-   *  getOlapColumns() first and passes the resolved field names in. */
-  async getOlapTransactions(from, to, groupByRowFields, aggregateFields, extraFilters = {}) {
+   *  getOlapColumns() first and passes the resolved field names in.
+   *  IMPORTANT: unlike SALES, this report does NOT necessarily support
+   *  "OpenDate.Typed" as a date field (confirmed: one install rejects it
+   *  with "Unknown OLAP field 'OpenDate.Typed'") — the caller must resolve
+   *  and pass the actual date field name for this report via dateField. */
+  async getOlapTransactions(from, to, groupByRowFields, aggregateFields, dateField, extraFilters = {}) {
     return this.olapPost({
       reportType: "TRANSACTIONS",
       buildSummary: true,
       groupByRowFields,
       aggregateFields,
       filters: {
-        "OpenDate.Typed": this.dateRangeFilter(from, to),
+        ...(dateField ? { [dateField]: this.dateRangeFilter(from, to) } : {}),
         ...extraFilters,
       },
     });
