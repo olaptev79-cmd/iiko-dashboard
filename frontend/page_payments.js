@@ -28,12 +28,13 @@ async function loadPayments(days, btn) {
     if (!document.getElementById('chartPayments')) {
       chartContainer.innerHTML = '<canvas id="chartPayments" height="220"></canvas>';
     }
+    const t = chartTheme();
     const ctx = document.getElementById('chartPayments').getContext('2d');
     if (chartPayments) chartPayments.destroy();
     chartPayments = new Chart(ctx, {
       type: 'doughnut',
-      data: { labels: d.payTypes.map(p => p.name), datasets: [{ data: d.payTypes.map(p => p.revenue), backgroundColor: ['#4f98a3','#a84b2f','#1b474d','#bce2e7','#944454','#ffc553','#848456','#6e522b'] }] },
-      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#cdccca', font: { size: 11 } } } } },
+      data: { labels: d.payTypes.map(p => p.name), datasets: [{ data: d.payTypes.map(p => p.revenue), backgroundColor: t.series }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: t.legend, font: { size: 11 } } } } },
     });
 
     tableEl.innerHTML = '<table><thead><tr><th>Тип оплаты</th><th>Выручка, ₽</th><th>Кол-во</th><th>Доля</th></tr></thead><tbody>' +
@@ -64,6 +65,8 @@ function startPage() {
   loadPayments(30);
   loadOrderTypes(30);
 }
+
+onThemeChangeRedrawCharts(() => { loadPayments(30); });
 
 // Делегирование кликов по кнопкам периода (без inline onclick — требование CSP)
 document.querySelectorAll('.period-btn[data-days]').forEach(function (btn) {

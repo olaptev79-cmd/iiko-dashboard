@@ -34,30 +34,40 @@ async function loadForecast() {
   } catch (e) { console.error(e); }
 }
 
+let _lastChartDays = 7, _lastDeptData = null;
 async function loadChart(days, btn) {
   document.querySelectorAll('#appScreen .charts-grid .period-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  _lastChartDays = days;
   try {
     const d = await api('/api/chart?days=' + days);
+    const t = chartTheme();
     const ctx = document.getElementById('chartRevenue').getContext('2d');
     if (chartRev) chartRev.destroy();
     chartRev = new Chart(ctx, {
       type: 'bar',
-      data: { labels: d.labels, datasets: [{ label: 'Выручка', data: d.revenue, backgroundColor: 'rgba(79,152,163,0.7)', borderRadius: 6 }] },
-      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876' }, grid: { display: false } }, y: { ticks: { color: '#797876' }, grid: { color: '#393836' } } } },
+      data: { labels: d.labels, datasets: [{ label: 'Выручка', data: d.revenue, backgroundColor: t.accent, borderRadius: 6 }] },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: t.text }, grid: { display: false } }, y: { ticks: { color: t.text }, grid: { color: t.grid } } } },
     });
   } catch (e) { console.error(e); }
 }
 
 function renderDeptChart(data) {
+  _lastDeptData = data;
+  const t = chartTheme();
   const ctx = document.getElementById('chartDepts').getContext('2d');
   if (chartDept) chartDept.destroy();
   chartDept = new Chart(ctx, {
     type: 'doughnut',
-    data: { labels: data.map(d => d.name), datasets: [{ data: data.map(d => d.revenue), backgroundColor: ['#4f98a3','#a84b2f','#1b474d','#bce2e7','#944454','#ffc553','#848456','#6e522b'] }] },
-    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#cdccca', font: { size: 11 } } } } },
+    data: { labels: data.map(d => d.name), datasets: [{ data: data.map(d => d.revenue), backgroundColor: t.series }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: t.legend, font: { size: 11 } } } } },
   });
 }
+
+onThemeChangeRedrawCharts(() => {
+  loadChart(_lastChartDays);
+  if (_lastDeptData) renderDeptChart(_lastDeptData);
+});
 
 async function loadDishes() {
   const el = document.getElementById('dishesTable');

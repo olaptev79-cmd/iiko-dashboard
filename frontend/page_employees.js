@@ -16,12 +16,13 @@ async function loadPerformance(days, btn) {
     el.innerHTML = '<canvas id="chartPerf" height="180"></canvas><table style="margin-top:20px;"><thead><tr><th>Сотрудник</th><th>Выручка, ₽</th><th>Чеки</th><th>Средний чек</th></tr></thead><tbody>' +
       top.map(e => `<tr><td>${esc(e.name)}</td><td>${fmt(e.revenue)}</td><td>${fmt(e.orders)}</td><td>${fmt(e.avgCheck)}</td></tr>`).join('') +
       '</tbody></table>';
+    const t = chartTheme();
     const ctx = document.getElementById('chartPerf').getContext('2d');
     if (chartPerf) chartPerf.destroy();
     chartPerf = new Chart(ctx, {
       type: 'bar',
-      data: { labels: top.map(e => e.name), datasets: [{ label: 'Выручка, ₽', data: top.map(e => e.revenue), backgroundColor: '#4f98a3', borderRadius: 4 }] },
-      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876' }, grid: { color: '#393836' } }, y: { ticks: { color: '#cdccca' }, grid: { display: false } } } },
+      data: { labels: top.map(e => e.name), datasets: [{ label: 'Выручка, ₽', data: top.map(e => e.revenue), backgroundColor: t.accent, borderRadius: 4 }] },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: t.text }, grid: { color: t.grid } }, y: { ticks: { color: t.legend }, grid: { display: false } } } },
     });
   } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
@@ -45,6 +46,8 @@ function startPage() {
   loadPerformance(30);
   loadDirectory();
 }
+
+onThemeChangeRedrawCharts(() => { loadPerformance(30); });
 
 // Делегирование кликов по кнопкам периода (без inline onclick — требование CSP)
 document.querySelectorAll('.period-btn[data-days]').forEach(function (btn) {

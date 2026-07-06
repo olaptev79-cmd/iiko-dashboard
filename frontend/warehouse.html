@@ -7,7 +7,7 @@
 <title>Склад — Aqba Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500;1,9..144,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared.css">
 <script src="vendor_chart.umd.min.js"></script>
 </head>
@@ -45,16 +45,24 @@
 </div>
 
 <div id="appScreen" class="hidden">
-<header>
+<div id="appLayout">
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-mark">A</div>
+    <div class="brand-text">Aqba<span>Dashboard</span></div>
+  </div>
+  <nav class="side-nav" id="mainNav"></nav>
+  <div class="sidebar-foot">Аналитика iikoRMS / iikoServer</div>
+</aside>
+<div class="main-col">
+<header class="topbar">
   <div class="header-top">
-    <div class="brand">Aqba <span>Dashboard</span></div>
     <div class="header-right">
       <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
       <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
       <button class="btn-ghost" id="logoutBtn">Выйти</button>
     </div>
   </div>
-  <nav class="tabs" id="mainNav"></nav>
 </header>
 <div class="container">
 <div class="page-title">Склад и себестоимость</div>
@@ -85,6 +93,12 @@
 
 </div>
 </div>
+</div>
+</div>
+
+<nav class="bottom-nav" id="bottomNav-wrapper">
+  <div class="bottom-nav-inner" id="bottomNav"></div>
+</nav>
 
 <script src="shared.js"></script>
 <script src="page_warehouse.js"></script>

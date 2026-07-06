@@ -24,29 +24,41 @@ async function loadMenu(days, btn) {
   } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
+let _lastCategories = null, _lastAbc = null;
 function renderCategoryChart(categories) {
+  _lastCategories = categories;
+  const t = chartTheme();
   const ctx = document.getElementById('chartCategories').getContext('2d');
   if (chartCategories) chartCategories.destroy();
   const top = categories.slice(0, 10);
   chartCategories = new Chart(ctx, {
     type: 'bar',
-    data: { labels: top.map(c => c.name), datasets: [{ label: 'Выручка, ₽', data: top.map(c => c.revenue), backgroundColor: '#4f98a3', borderRadius: 4 }] },
-    options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#797876' }, grid: { color: '#393836' } }, y: { ticks: { color: '#cdccca' }, grid: { display: false } } } },
+    data: { labels: top.map(c => c.name), datasets: [{ label: 'Выручка, ₽', data: top.map(c => c.revenue), backgroundColor: t.accent, borderRadius: 4 }] },
+    options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: t.text }, grid: { color: t.grid } }, y: { ticks: { color: t.legend }, grid: { display: false } } } },
   });
 }
 
 function renderAbcChart(abc) {
+  _lastAbc = abc;
+  const t = chartTheme();
   const ctx = document.getElementById('chartAbc').getContext('2d');
   if (chartAbc) chartAbc.destroy();
   chartAbc = new Chart(ctx, {
     type: 'doughnut',
     data: {
+      // A/B/C — осмысленная шкала «хорошо → плохо», поэтому цвета семантические
+      // (success/warning/risk), а не из категориальной последовательности.
       labels: ['A — основная выручка', 'B — стабильные', 'C — кандидаты на исключение'],
-      datasets: [{ data: [abc.A, abc.B, abc.C], backgroundColor: ['#6daa45', '#ffc553', '#d163a7'] }],
+      datasets: [{ data: [abc.A, abc.B, abc.C], backgroundColor: [getComputedStyle(document.documentElement).getPropertyValue('--success').trim() || '#8fbb4a', t.accent, t.risk] }],
     },
-    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#cdccca', font: { size: 11 } } } } },
+    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: t.legend, font: { size: 11 } } } } },
   });
 }
+
+onThemeChangeRedrawCharts(() => {
+  if (_lastCategories) renderCategoryChart(_lastCategories);
+  if (_lastAbc) renderAbcChart(_lastAbc);
+});
 
 function exportCsv() {
   downloadCsv('/api/export/top-dishes.csv?days=' + currentDays, `top-dishes-${currentDays}d.csv`);

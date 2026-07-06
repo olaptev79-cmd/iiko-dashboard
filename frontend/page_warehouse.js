@@ -37,13 +37,14 @@ async function loadWarehouse(days, btn) {
     if (!document.getElementById('chartAccounts')) {
       chartContainer.innerHTML = '<canvas id="chartAccounts" height="220"></canvas>';
     }
+    const t = chartTheme();
     const ctx = document.getElementById('chartAccounts').getContext('2d');
     if (chartAccounts) chartAccounts.destroy();
     const top = d.accounts.slice(0, 8);
     chartAccounts = new Chart(ctx, {
       type: 'doughnut',
-      data: { labels: top.map(a => a.name), datasets: [{ data: top.map(a => a.sum), backgroundColor: ['#4f98a3','#a84b2f','#1b474d','#bce2e7','#944454','#ffc553','#848456','#6e522b'] }] },
-      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: '#cdccca', font: { size: 11 } } } } },
+      data: { labels: top.map(a => a.name), datasets: [{ data: top.map(a => a.sum), backgroundColor: t.series }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { color: t.legend, font: { size: 11 } } } } },
     });
 
     accountsTableEl.innerHTML = '<table><thead><tr><th>Счёт</th><th>Сумма, ₽</th><th>Кол-во</th></tr></thead><tbody>' +
@@ -63,6 +64,8 @@ async function loadWarehouse(days, btn) {
 function startPage() {
   loadWarehouse(30);
 }
+
+onThemeChangeRedrawCharts(() => { loadWarehouse(30); });
 
 // Делегирование кликов по кнопкам периода (без inline onclick — требование CSP)
 document.querySelectorAll('.period-btn[data-days]').forEach(function (btn) {

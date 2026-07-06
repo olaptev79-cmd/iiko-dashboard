@@ -12,6 +12,7 @@ async function loadBranches(days, btn) {
       el.innerHTML = '<div class="empty-box">Нет данных за период</div>';
       return;
     }
+    const t = chartTheme();
     const ctx = document.getElementById('chartBranches').getContext('2d');
     if (chartBranches) chartBranches.destroy();
     chartBranches = new Chart(ctx, {
@@ -19,11 +20,11 @@ async function loadBranches(days, btn) {
       data: {
         labels: d.branches.map(b => b.name),
         datasets: [
-          { label: 'Текущий период', data: d.branches.map(b => b.revenue), backgroundColor: '#4f98a3', borderRadius: 4 },
-          { label: 'Предыдущий период', data: d.branches.map(b => b.prevRevenue), backgroundColor: '#393836', borderRadius: 4 },
+          { label: 'Текущий период', data: d.branches.map(b => b.revenue), backgroundColor: t.accent, borderRadius: 4 },
+          { label: 'Предыдущий период', data: d.branches.map(b => b.prevRevenue), backgroundColor: t.grid, borderRadius: 4 },
         ],
       },
-      options: { responsive: true, plugins: { legend: { labels: { color: '#cdccca' } } }, scales: { x: { ticks: { color: '#797876' }, grid: { display: false } }, y: { ticks: { color: '#797876' }, grid: { color: '#393836' } } } },
+      options: { responsive: true, plugins: { legend: { labels: { color: t.legend } } }, scales: { x: { ticks: { color: t.text }, grid: { display: false } }, y: { ticks: { color: t.text }, grid: { color: t.grid } } } },
     });
 
     el.innerHTML = '<table><thead><tr><th>Филиал</th><th>Выручка</th><th>Чеки</th><th>Пред. период</th><th>Изменение</th></tr></thead><tbody>' +
@@ -49,6 +50,8 @@ function startPage() {
   loadBranches(30);
   loadDepartments();
 }
+
+onThemeChangeRedrawCharts(() => { loadBranches(30); });
 
 // Делегирование кликов по кнопкам периода (без inline onclick — требование CSP)
 document.querySelectorAll('.period-btn[data-days]').forEach(function (btn) {
