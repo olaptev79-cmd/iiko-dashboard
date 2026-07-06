@@ -187,6 +187,7 @@ app.get("/api/employees/performance", requireAuth, wrap((r) => svc.getEmployeePe
 app.get("/api/employees/directory", requireAuth, wrap((r) => svc.getEmployeeDirectory(r.client)));
 app.get("/api/forecast", requireAuth, wrap((r) => svc.getForecast(r.client)));
 app.get("/api/warehouse", requireAuth, wrap((r) => svc.getWarehouse(r.client, clampDays(r.query.days, 30))));
+app.get("/api/risky-operations", requireAuth, wrap((r) => svc.getRiskyOperations(r.client, clampDays(r.query.days, 30))));
 
 // CSV export for the top-dishes report (Excel-friendly, UTF-8 BOM + ;-separated).
 app.get(

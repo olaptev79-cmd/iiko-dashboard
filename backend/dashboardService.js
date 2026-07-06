@@ -452,6 +452,25 @@ async function getTransactionColumns(client) {
   return warehouseColumnsCache;
 }
 
+let salesColumnsCache = null;
+let salesColumnsCacheAt = 0;
+const SALES_COLUMNS_TTL_MS = 10 * 60 * 1000;
+
+/** Same dynamic-discovery approach as getTransactionColumns(), but for the
+ *  SALES report — used by getRiskyOperations() below to find fields for
+ *  deletions/refunds/discounts, which vary by iiko install/version. */
+async function getSalesColumns(client) {
+  const now = Date.now();
+  if (salesColumnsCache && now - salesColumnsCacheAt < SALES_COLUMNS_TTL_MS) {
+    return salesColumnsCache;
+  }
+  const raw = await client.getOlapColumns("SALES");
+  const names = Object.keys(raw || {});
+  salesColumnsCache = { raw, names };
+  salesColumnsCacheAt = now;
+  return salesColumnsCache;
+}
+
 function pickField(names, patterns) {
   for (const pattern of patterns) {
     const hit = names.find((n) => pattern.test(n));
@@ -579,6 +598,177 @@ async function getWarehouse(client, days = 30) {
   };
 }
 
+// --- Risky ("dangerous") register operations — discounts, deletions,
+// refunds, voided/cancelled checks — surfaced via the SALES OLAP report.
+//
+// Exact field names for deletion/refund/discount markers vary across iiko
+// versions/installs, so (mirroring getWarehouse() above) they are resolved
+// dynamically via getSalesColumns() + pickField() rather than hardcoded,
+// with the exception of fields already CONFIRMED working elsewhere in this
+// file for this exact install (DeletedWithWriteoff, DishDiscountSumInt,
+// WaiterName, CashierName, OrderType, OpenDate.Typed, HourOpen, DishName,
+// UniqOrderId) — those are used directly, and only genuinely new fields
+// (order-deleted flag, check-refund flag, discount name/percent, deletion
+// comment) go through dynamic discovery.
+const DISCOUNT_PERCENT_THRESHOLD = 15; // manual discounts at/above this % are flagged "risky"
+
+async function getRiskyOperations(client, days = 30) {
+  const { from, to } = daysRange(days);
+
+  const colsRes = await safe(() => getSalesColumns(client));
+  if (!colsRes.ok) {
+    return { available: false, error: colsRes.error, events: [], byEmployee: [], totals: {} };
+  }
+  const { names } = colsRes.value;
+
+  // Confirmed-working fields on this codebase's target install (used as-is).
+  const DELETED_WITH_WRITEOFF = "DeletedWithWriteoff";
+  const DISCOUNT_SUM = "DishDiscountSumInt";
+  const WAITER = "WaiterName";
+  const CASHIER = "CashierName";
+  const ORDER_TYPE = "OrderType";
+  const DATE_FIELD = "OpenDate.Typed";
+  const HOUR_FIELD = "HourOpen";
+  const DISH_NAME = "DishName";
+  const ORDER_ID = "UniqOrderId";
+  const DISH_SUM = "DishSumInt";
+
+  // Dynamically-discovered fields — not confirmed on every install, so we
+  // fall back gracefully (a field that isn't found is simply omitted from
+  // groupByRowFields and its signal is skipped when classifying events).
+  const orderDeletedField = pickField(names, [/^OrderDeleted$/i, /^Order\.Deleted$/i]);
+  const checkRefundField = pickField(names, [/^StornoReason$/i, /^Storno$/i, /^IsReturn$/i, /^ReturnedSum$/i]);
+  const discountNameField = pickField(names, [/^DiscountName$/i, /^Discounts\.Name$/i, /^Discount$/i]);
+  const discountPercentField = pickField(names, [/^DiscountPercent$/i, /^Discounts\.Percent$/i]);
+  const deletionCommentField = pickField(names, [/DeletionComment/i, /DeleteComment/i, /RemovalComment/i]);
+  const payTypesField = pickField(names, [/^PayTypes$/i]);
+
+  const groupByRowFields = [
+    DATE_FIELD,
+    HOUR_FIELD,
+    WAITER,
+    CASHIER,
+    ORDER_ID,
+    DISH_NAME,
+    DELETED_WITH_WRITEOFF,
+    ORDER_TYPE,
+    orderDeletedField,
+    checkRefundField,
+    discountNameField,
+    discountPercentField,
+    deletionCommentField,
+    payTypesField,
+  ].filter(Boolean);
+
+  const aggregateFields = [DISH_SUM, DISCOUNT_SUM].filter(Boolean);
+
+  const reportRes = await safe(() =>
+    client.getOlapRiskyOps(from, to, groupByRowFields, aggregateFields)
+  );
+  if (!reportRes.ok) {
+    return { available: false, error: reportRes.error, events: [], byEmployee: [], totals: {} };
+  }
+
+  const rows = client.parseOlap(reportRes.value);
+  const events = [];
+
+  rows.forEach((r) => {
+    const sum = parseFloat(r[DISH_SUM] || 0);
+    const discountSum = parseFloat(r[DISCOUNT_SUM] || 0);
+    const deletedWithWriteoff = String(r[DELETED_WITH_WRITEOFF] || "").toUpperCase();
+    const isDeletedDish =
+      deletedWithWriteoff && deletedWithWriteoff !== "NOT_DELETED" && deletedWithWriteoff !== "FALSE" && deletedWithWriteoff !== "0";
+    const isOrderDeleted = orderDeletedField
+      ? ["TRUE", "1", "YES"].includes(String(r[orderDeletedField] || "").toUpperCase())
+      : false;
+    const isRefund = checkRefundField
+      ? ["TRUE", "1", "YES"].includes(String(r[checkRefundField] || "").toUpperCase()) || parseFloat(r[checkRefundField] || 0) > 0
+      : false;
+    const discountPercent = discountPercentField ? parseFloat(r[discountPercentField] || 0) : null;
+    // If the install doesn't expose an explicit discount-percent field,
+    // approximate it from discount sum vs. dish sum (before discount) so a
+    // few-ruble discount isn't flagged as "risky" just because the percent
+    // field itself is unavailable.
+    const impliedPercent =
+      discountPercent != null ? discountPercent : sum + discountSum > 0 ? (discountSum / (sum + discountSum)) * 100 : 0;
+    const isBigDiscount = discountSum > 0 && impliedPercent >= DISCOUNT_PERCENT_THRESHOLD;
+    const isDeliveryPaymentRemoved =
+      payTypesField && !r[payTypesField] && String(r[ORDER_TYPE] || "").toLowerCase().includes("delivery");
+
+    const reasons = [];
+    if (isDeletedDish) reasons.push({ type: "deleted_dish", label: "Удаление блюда со списанием" });
+    if (isOrderDeleted) reasons.push({ type: "order_deleted", label: "Полное аннулирование чека" });
+    if (isRefund) reasons.push({ type: "refund", label: "Возврат денег после оплаты" });
+    if (isBigDiscount) reasons.push({ type: "big_discount", label: "Крупная/ручная скидка" });
+    if (isDeliveryPaymentRemoved) reasons.push({ type: "payment_removed", label: "Удалена привязанная оплата (доставка)" });
+
+    if (!reasons.length) return;
+
+    const employee = r[WAITER] || r[CASHIER] || "Не указано";
+    const date = r[DATE_FIELD] || null;
+    const hour = r[HOUR_FIELD] != null ? r[HOUR_FIELD] : null;
+
+    reasons.forEach((reason) => {
+      events.push({
+        type: reason.type,
+        label: reason.label,
+        date,
+        hour,
+        employee,
+        orderId: r[ORDER_ID] || null,
+        dish: r[DISH_NAME] || null,
+        discountName: discountNameField ? r[discountNameField] || null : null,
+        discountPercent,
+        sum: +sum.toFixed(2),
+        discountSum: +discountSum.toFixed(2),
+        comment: deletionCommentField ? r[deletionCommentField] || null : null,
+      });
+    });
+  });
+
+  events.sort((a, b) => {
+    if (a.date !== b.date) return a.date > b.date ? -1 : 1;
+    return (b.hour || 0) - (a.hour || 0);
+  });
+
+  const byEmployee = {};
+  events.forEach((e) => {
+    if (!byEmployee[e.employee]) {
+      byEmployee[e.employee] = { name: e.employee, total: 0, sum: 0, byType: {} };
+    }
+    byEmployee[e.employee].total += 1;
+    byEmployee[e.employee].sum += e.discountSum || e.sum || 0;
+    byEmployee[e.employee].byType[e.type] = (byEmployee[e.employee].byType[e.type] || 0) + 1;
+  });
+
+  const totals = {
+    events: events.length,
+    deletedDish: events.filter((e) => e.type === "deleted_dish").length,
+    orderDeleted: events.filter((e) => e.type === "order_deleted").length,
+    refund: events.filter((e) => e.type === "refund").length,
+    bigDiscount: events.filter((e) => e.type === "big_discount").length,
+    paymentRemoved: events.filter((e) => e.type === "payment_removed").length,
+    discountSum: +events.reduce((s, e) => s + (e.discountSum || 0), 0).toFixed(2),
+  };
+
+  return {
+    available: true,
+    events: events.slice(0, 300),
+    byEmployee: Object.values(byEmployee)
+      .map((e) => ({ ...e, sum: +e.sum.toFixed(2) }))
+      .sort((a, b) => b.total - a.total),
+    totals,
+    fieldsDetected: {
+      orderDeleted: !!orderDeletedField,
+      refund: !!checkRefundField,
+      discountName: !!discountNameField,
+      discountPercent: !!discountPercentField,
+      deletionComment: !!deletionCommentField,
+    },
+    source: "live",
+  };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -595,4 +785,5 @@ module.exports = {
   getEmployeeDirectory,
   getForecast,
   getWarehouse,
+  getRiskyOperations,
 };

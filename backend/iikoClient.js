@@ -402,6 +402,23 @@ class IikoClient {
     });
   }
 
+  /** Generic escape hatch for the SALES OLAP report with caller-supplied
+   *  fields — used for the "risky operations" report (deletions/refunds/
+   *  discounts), where the exact field set is resolved dynamically by
+   *  dashboardService via getOlapColumns("SALES") since it varies by
+   *  install. Rows come back untouched from parseOlap(). */
+  async getOlapRiskyOps(from, to, groupByRowFields, aggregateFields) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: false,
+      groupByRowFields,
+      aggregateFields,
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
   /** Fetches the list of fields available for a given OLAP report type
    *  (e.g. "TRANSACTIONS"), including their name/type/grouping/aggregation
    *  capability. Different iiko installs/versions expose different field

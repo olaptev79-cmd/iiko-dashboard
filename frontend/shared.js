@@ -11,6 +11,7 @@ const PAGES = [
   { href: 'payments.html', label: 'Оплаты' },
   { href: 'employees.html', label: 'Сотрудники' },
   { href: 'warehouse.html', label: 'Склад' },
+  { href: 'risky.html', label: 'Опасные операции' },
 ];
 
 async function api(path, opts = {}) {

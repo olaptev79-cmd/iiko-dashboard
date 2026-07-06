@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Опасные операции — Aqba Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500;1,9..144,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+
+<div id="loginScreen">
+  <button class="theme-toggle login-theme-toggle" type="button" aria-label="Переключить тему"></button>
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo">Aqba <span>Dashboard</span></div>
+      <div class="tagline">Аналитика для iikoRMS / iikoServer</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="fServer">Адрес сервера</label>
+        <input id="fServer" type="text" placeholder="mycompany.iiko.it" autocomplete="url" required/>
+        <div class="field-hint">Можно без https:// — добавим автоматически</div>
+      </div>
+      <div class="field">
+        <label for="fLogin">Логин</label>
+        <input id="fLogin" type="text" placeholder="admin" autocomplete="username" required/>
+      </div>
+      <div class="field">
+        <label for="fPassword">Пароль</label>
+        <input id="fPassword" type="password" placeholder="••••••••" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input id="fRemember" type="checkbox" checked/>
+        <label for="fRemember">Запомнить адрес и логин на этом устройстве</label>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div id="appScreen" class="hidden">
+<header>
+  <div class="header-top">
+    <div class="brand">Aqba <span>Dashboard</span></div>
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <nav class="tabs" id="mainNav"></nav>
+</header>
+<div class="container">
+<div class="page-title">Опасные операции на кассе</div>
+
+<div class="kpi-grid">
+<div class="kpi"><div class="label">Всего событий</div><div class="value" id="kpiEvents">—</div><div class="sub">за период</div></div>
+<div class="kpi"><div class="label">Удаления со списанием</div><div class="value" id="kpiDeletedDish">—</div><div class="sub">блюд</div></div>
+<div class="kpi"><div class="label">Аннулировано чеков</div><div class="value" id="kpiOrderDeleted">—</div><div class="sub">полностью</div></div>
+<div class="kpi"><div class="label">Возвраты после оплаты</div><div class="value" id="kpiRefund">—</div><div class="sub">операций</div></div>
+<div class="kpi"><div class="label">Крупные скидки</div><div class="value" id="kpiBigDiscount">—</div><div class="sub">на сумму <span id="kpiDiscountSum">0</span> ₽</div></div>
+</div>
+
+<div class="period-btns">
+<button class="period-btn" data-days="7">7 дней</button>
+<button class="period-btn active" data-days="30">30 дней</button>
+<button class="period-btn" data-days="90">90 дней</button>
+</div>
+
+<div id="riskyUnavailable"></div>
+
+<div class="charts-grid-even" id="riskyContent">
+<div class="card">
+<h2>Рейтинг сотрудников <span class="hint">по числу опасных операций</span></h2>
+<div id="employeeTable"><div class="loading">Загрузка...</div></div>
+</div>
+<div class="card">
+<h2>Типы операций <span class="hint">за период</span></h2>
+<div id="typesBreakdown"><div class="loading">Загрузка...</div></div>
+</div>
+</div>
+
+<div class="card" id="riskyTimelineCard">
+<h2>Хроника событий <span class="hint">кто и когда — последние сверху</span></h2>
+<div class="period-btns" id="riskyFilters"></div>
+<div id="eventsTimeline"><div class="loading">Загрузка...</div></div>
+</div>
+
+</div>
+</div>
+
+<script src="shared.js"></script>
+<script src="page_risky.js"></script>
+</body>
+</html>
