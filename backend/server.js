@@ -443,6 +443,20 @@ app.get("/api/worst-dishes", requireAuth, wrap((r) => svc.getWorstDishes(r.clien
 app.get("/api/dish-margin", requireAuth, wrap((r) => svc.getDishMargin(r.client, clampDays(r.query.days, 30))));
 app.get("/api/cancellation-reasons", requireAuth, wrap((r) => svc.getCancellationReasons(r.client, clampDays(r.query.days, 30))));
 
+// Feature: shift efficiency (#16), dish repeats (#7), attendance anomalies (#17)
+app.get("/api/shift-efficiency", requireAuth, wrap((r) => svc.getShiftEfficiency(r.client, clampDays(r.query.days, 30))));
+app.get("/api/dish-repeats", requireAuth, wrap((r) => svc.getDishRepeats(r.client, clampDays(r.query.days, 30))));
+app.get(
+  "/api/attendance-anomalies",
+  requireAuth,
+  (req, res, next) => {
+    const err = validateDateRangeParams(req.query.from, req.query.to);
+    if (err) return res.status(400).json({ error: err });
+    next();
+  },
+  wrap((r) => svc.getAttendanceAnomalies(r.client, r.query.from, r.query.to))
+);
+
 // ---------------- Dashboard admin: users/roles + audit log ----------------
 // Dashboard-UI permissions only (see userStore.js) — separate from iiko's
 // own role model. Every dashboard login gets a viewer/editor/admin role

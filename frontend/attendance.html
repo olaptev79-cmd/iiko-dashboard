@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Явки сотрудников — Aqba Dashboard</title>
@@ -9,6 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1A1815">
 <script src="vendor_chart.umd.min.js"></script>
 </head>
 <body>
@@ -68,15 +70,21 @@
 <div class="page-title">Явки сотрудников</div>
 
 <div class="card">
-<h2>Фильтры<span class="hint">период и сотрудник</span></h2>
+<h2>Фильтры<span class="hint">период и сотрудник · сохраняются на этом устройстве</span></h2>
 <div class="date-range-row">
   <div class="field"><label for="attFrom">С даты</label><input type="date" id="attFrom"></div>
   <div class="field"><label for="attTo">По дату</label><input type="date" id="attTo"></div>
   <div class="field"><label for="attEmployee">Сотрудник</label>
     <select id="attEmployee"><option value="">Все сотрудники</option></select>
   </div>
-  <button class="btn-ghost" id="attApplyBtn" type="button">Применить</button>
+  <button class="btn-primary" id="attApplyBtn" type="button" style="width:auto;margin-top:0;">Применить</button>
+  <button class="btn-ghost" id="attResetBtn" type="button">Сбросить</button>
 </div>
+</div>
+
+<div class="card">
+<h2>Аномалии по сменам<span class="hint">короткие смены (&lt;4 ч) и переработки (&gt;12 ч)</span></h2>
+<div id="attendanceAnomalies"><div class="loading">Загрузка...</div></div>
 </div>
 
 <div class="card">

@@ -7,6 +7,7 @@ async function loadMenu(days, btn) {
   if (btn) btn.classList.add('active');
   loadWorstDishes(days);
   loadMargin(days);
+  loadDishRepeats(days);
   const el = document.getElementById('menuTable');
   el.innerHTML = '<div class="loading">Загрузка...</div>';
   try {
@@ -92,6 +93,20 @@ async function loadMargin(days) {
         const cls = r.marginPct < 0 ? 'down' : r.marginPct < 25 ? 'flat' : 'up';
         return `<tr><td>${esc(r.name)}</td><td>${fmt(r.revenue)}</td><td>${fmt(r.cost)}</td><td>${fmt(r.margin)}</td><td class="delta ${cls}">${r.marginPct}%</td></tr>`;
       }).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
+// ---- Повторы блюд в чеке (#7) ----
+async function loadDishRepeats(days) {
+  const el = document.getElementById('repeatDishesTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/dish-repeats?days=' + days);
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет данных') + '</div>'; return; }
+    if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Повторов блюд в одном чеке за период не найдено</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Заказов с повтором</th><th>Доп. порций</th></tr></thead><tbody>' +
+      d.dishes.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${fmt(r.repeatOrders)}</td><td>${fmt(r.extraUnits)}</td></tr>`).join('') +
       '</tbody></table>';
   } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }

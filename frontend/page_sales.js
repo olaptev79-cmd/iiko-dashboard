@@ -145,12 +145,27 @@ async function runPlanFact() {
   }
 }
 
+// ---- Эффективность по сменам (#16) ----
+async function loadShiftEfficiency() {
+  const el = document.getElementById('shiftEfficiency');
+  try {
+    const d = await api('/api/shift-efficiency?days=30');
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет почасовых данных') + '</div>'; return; }
+    const maxRev = Math.max(1, ...d.shifts.map(s => s.revenue));
+    el.innerHTML = '<table><thead><tr><th>Смена</th><th>Выручка, ₽</th><th>Чеки</th><th>Средний чек, ₽</th><th></th></tr></thead><tbody>' +
+      d.shifts.map(s => `<tr><td>${esc(s.label)}</td><td>${fmt(s.revenue)}</td><td>${fmt(s.orders)}</td><td>${fmt(s.avgCheck)}</td>` +
+        `<td style="width:120px;"><div class="pf-bar"><div class="pf-bar-fill" style="width:${Math.round(s.revenue / maxRev * 100)}%;"></div></div></td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
 function startPage() {
   loadChart(30);
   loadWeekday();
   loadHourly();
   loadAvgTrend(30);
   loadYoY();
+  loadShiftEfficiency();
   // Предзаполняем период план/факта последними 30 днями.
   const to = new Date();
   const from = new Date();

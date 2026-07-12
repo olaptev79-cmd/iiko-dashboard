@@ -1413,6 +1413,103 @@ async function getCancellationReasons(client, days = 30) {
   };
 }
 
+// --- Per-shift (day-part) efficiency (#16) ---
+// Buckets the hourly SALES report into morning/day/evening/night shifts and
+// reports revenue, order count and average check per shift. Reuses the same
+// getOlapHourly() call the hourly-activity chart already uses.
+function shiftKeyForHour(h) {
+  if (h >= 6 && h < 11) return "morning";
+  if (h >= 11 && h < 16) return "day";
+  if (h >= 16 && h < 22) return "evening";
+  return "night";
+}
+const SHIFT_LABELS = {
+  morning: "Утро (06:00–11:00)",
+  day: "День (11:00–16:00)",
+  evening: "Вечер (16:00–22:00)",
+  night: "Ночь (22:00–06:00)",
+};
+async function getShiftEfficiency(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapHourly(from, to));
+  if (!res.ok) return { available: false, error: res.error, shifts: [] };
+  const acc = { morning: { revenue: 0, orders: 0 }, day: { revenue: 0, orders: 0 }, evening: { revenue: 0, orders: 0 }, night: { revenue: 0, orders: 0 } };
+  client.parseOlap(res.value).forEach((r) => {
+    let h = parseInt(r["HourOpen"], 10);
+    if (Number.isNaN(h)) { const raw = r["HourOpen"]; h = raw != null ? parseInt(String(raw).slice(0, 2), 10) : NaN; }
+    if (Number.isNaN(h) || h < 0 || h > 23) return;
+    const k = shiftKeyForHour(h);
+    acc[k].revenue += parseFloat(r["DishSumInt"] || 0);
+    acc[k].orders += parseInt(r["DishAmountInt"] || 0, 10);
+  });
+  const shifts = Object.keys(SHIFT_LABELS).map((k) => ({
+    key: k,
+    label: SHIFT_LABELS[k],
+    revenue: +acc[k].revenue.toFixed(2),
+    orders: acc[k].orders,
+    avgCheck: acc[k].orders > 0 ? +(acc[k].revenue / acc[k].orders).toFixed(2) : 0,
+  }));
+  return { available: true, shifts, source: "live" };
+}
+
+// --- Attendance anomalies: short shifts / overtime (#17) ---
+// There's no shift schedule in the data to compute true lateness against, so
+// this honestly flags unusually short (<4h) and long (>12h) shifts plus total
+// hours — built on top of the same getAttendance() parser (so it inherits its
+// live-server robustness and degradation).
+const SHIFT_SHORT_HOURS = 4;
+const SHIFT_LONG_HOURS = 12;
+async function getAttendanceAnomalies(client, from, to) {
+  const att = await getAttendance(client, from, to, null);
+  if (!att.available) return { available: false, error: att.error, flagged: [] };
+  const withHours = att.records.filter((r) => r.hours != null);
+  const flagged = withHours
+    .filter((r) => r.hours < SHIFT_SHORT_HOURS || r.hours > SHIFT_LONG_HOURS)
+    .map((r) => ({ ...r, flag: r.hours < SHIFT_SHORT_HOURS ? "short" : "long" }));
+  const totalHours = +withHours.reduce((s, r) => s + r.hours, 0).toFixed(1);
+  return {
+    available: true,
+    totalShifts: att.records.length,
+    shortCount: flagged.filter((f) => f.flag === "short").length,
+    longCount: flagged.filter((f) => f.flag === "long").length,
+    totalHours,
+    avgHours: withHours.length ? +(totalHours / withHours.length).toFixed(1) : 0,
+    flagged,
+    source: "live",
+  };
+}
+
+// --- Repeat dishes within a single order (#7) ---
+// Needs an order-identifier that this install allows grouping by (UniqOrderId
+// is explicitly non-groupable on some installs — see getRiskyOperations note).
+// Discovered dynamically; degrades to { available:false } when unsupported.
+const ORDER_NUM_FIELD_PATTERNS = [/^OrderNum$/i, /^OrderNumber$/i, /^Order\.Num$/i, /^Order\.Number$/i, /^SessionNum$/i];
+async function getDishRepeats(client, days = 30) {
+  const colsRes = await safe(() => getSalesColumns(client));
+  const orderField = colsRes.ok ? pickField(colsRes.value.names, ORDER_NUM_FIELD_PATTERNS) : null;
+  if (!orderField) {
+    return { available: false, error: "Сервер iiko не отдаёт номер заказа в отчёте — повторы блюд в одном чеке недоступны", dishes: [] };
+  }
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapDishRepeats(from, to, orderField));
+  if (!res.ok) return { available: false, error: res.error, dishes: [] };
+
+  const byDish = {};
+  client.parseOlap(res.value).forEach((r) => {
+    const qty = parseFloat(r["DishAmountInt"] || 0);
+    if (qty <= 1) return; // "repeat" = same dish more than once in one order
+    const name = r["DishName"] || "—";
+    if (!byDish[name]) byDish[name] = { name, repeatOrders: 0, extraUnits: 0 };
+    byDish[name].repeatOrders += 1;
+    byDish[name].extraUnits += qty - 1;
+  });
+  const dishes = Object.values(byDish)
+    .map((d) => ({ name: d.name, repeatOrders: d.repeatOrders, extraUnits: Math.round(d.extraUnits) }))
+    .sort((a, b) => b.repeatOrders - a.repeatOrders)
+    .slice(0, 20);
+  return { available: true, dishes, source: "live" };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -1440,4 +1537,7 @@ module.exports = {
   getWorstDishes,
   getDishMargin,
   getCancellationReasons,
+  getShiftEfficiency,
+  getAttendanceAnomalies,
+  getDishRepeats,
 };

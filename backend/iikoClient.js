@@ -432,6 +432,22 @@ class IikoClient {
     });
   }
 
+  /** Sales grouped by order-identifier + dish, to find dishes ordered more
+   *  than once within a single order (#7). `orderField` is discovered per
+   *  install; if that install won't let it be grouped, olapPost throws and
+   *  the caller degrades to { available:false }. */
+  async getOlapDishRepeats(from, to, orderField) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: false,
+      groupByRowFields: [orderField, "DishName"],
+      aggregateFields: ["DishAmountInt", "DishSumInt"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
   /** Sales grouped by hour of day (0-23) — powers the hourly activity heatmap. */
   async getOlapHourly(from, to) {
     return this.olapPost({

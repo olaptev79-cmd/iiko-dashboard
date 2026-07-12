@@ -107,6 +107,8 @@ async function loadBranches() {
 function startPage() {
   loadSummary(); loadForecast(); loadAverageCheck(); loadChart(7); loadDishes(); loadBranches();
   pollTimers.push(setInterval(loadSummary, 60000));
+  // #42/#43: make the KPI tiles a personalisable board (drag + pin, persisted)
+  initWidgetBoard(document.getElementById('kpiGrid'), 'index_kpi');
 }
 
 // Делегирование кликов по кнопкам периода (без inline onclick — требование CSP)

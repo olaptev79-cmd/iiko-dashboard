@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<script>(function(){try{var t=localStorage.getItem('aqba_theme')||'dark';document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Обзор — Aqba Dashboard</title>
@@ -9,6 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1A1815">
 <script src="vendor_chart.umd.min.js"></script>
 </head>
 <body>
@@ -68,15 +70,15 @@
 </header>
 <div class="container">
 <div class="page-title">Обзор</div>
-<div class="kpi-grid">
-<div class="kpi"><div class="label">Выручка</div><div class="value" id="kpiRevenue">—</div><div class="sub">рублей, сегодня</div><div class="delta" id="kpiRevenueDelta"></div></div>
-<div class="kpi"><div class="label">Чеки</div><div class="value" id="kpiOrders">—</div><div class="sub">штук</div><div class="delta" id="kpiOrdersDelta"></div></div>
-<div class="kpi"><div class="label">Средний чек</div><div class="value" id="kpiAvg">—</div><div class="sub">рублей</div><div class="delta" id="kpiAvgDelta"></div></div>
-<div class="kpi"><div class="label">Гости</div><div class="value" id="kpiGuests">—</div><div class="sub" id="kpiGuestsSub">человек, оценка</div></div>
-<div class="kpi"><div class="label">Прогноз выручки</div><div class="value" id="kpiForecast">—</div><div class="sub">рублей, неделя</div></div>
-<div class="kpi"><div class="label">Выполнение плана</div><div class="value" id="kpiPlan">—</div><div class="sub">%</div></div>
-<div class="kpi"><div class="label">Средний чек — неделя</div><div class="value" id="kpiAvgWeek">—</div><div class="sub">рублей</div><div class="delta" id="kpiAvgWeekDelta"></div></div>
-<div class="kpi"><div class="label">Средний чек — месяц</div><div class="value" id="kpiAvgMonth">—</div><div class="sub">рублей</div><div class="delta" id="kpiAvgMonthDelta"></div></div>
+<div class="kpi-grid" id="kpiGrid">
+<div class="kpi" data-widget="revenue"><div class="label">Выручка</div><div class="value" id="kpiRevenue">—</div><div class="sub">рублей, сегодня</div><div class="delta" id="kpiRevenueDelta"></div></div>
+<div class="kpi" data-widget="orders"><div class="label">Чеки</div><div class="value" id="kpiOrders">—</div><div class="sub">штук</div><div class="delta" id="kpiOrdersDelta"></div></div>
+<div class="kpi" data-widget="avg"><div class="label">Средний чек</div><div class="value" id="kpiAvg">—</div><div class="sub">рублей</div><div class="delta" id="kpiAvgDelta"></div></div>
+<div class="kpi" data-widget="guests"><div class="label">Гости</div><div class="value" id="kpiGuests">—</div><div class="sub" id="kpiGuestsSub">человек, оценка</div></div>
+<div class="kpi" data-widget="forecast"><div class="label">Прогноз выручки</div><div class="value" id="kpiForecast">—</div><div class="sub">рублей, неделя</div></div>
+<div class="kpi" data-widget="plan"><div class="label">Выполнение плана</div><div class="value" id="kpiPlan">—</div><div class="sub">%</div></div>
+<div class="kpi" data-widget="avgWeek"><div class="label">Средний чек — неделя</div><div class="value" id="kpiAvgWeek">—</div><div class="sub">рублей</div><div class="delta" id="kpiAvgWeekDelta"></div></div>
+<div class="kpi" data-widget="avgMonth"><div class="label">Средний чек — месяц</div><div class="value" id="kpiAvgMonth">—</div><div class="sub">рублей</div><div class="delta" id="kpiAvgMonthDelta"></div></div>
 </div>
 <div class="charts-grid">
 <div class="card"><h2>Выручка по дням</h2>

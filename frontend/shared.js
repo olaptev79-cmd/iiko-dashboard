@@ -89,8 +89,17 @@ function esc(value) {
 // script in <head> (before shared.js loads) to avoid a flash of the wrong
 // theme. This section just wires up the toggle button(s) and keeps
 // localStorage in sync.
+// #41: when the user hasn't explicitly picked a theme, follow the OS
+// (prefers-color-scheme). Mirrors the inline <head> bootstrap so there's no
+// flash and no disagreement between first paint and shared.js.
+function systemTheme() {
+  try { return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; } catch { return 'dark'; }
+}
 function getTheme() {
-  try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    return stored || systemTheme();
+  } catch { return 'dark'; }
 }
 const THEME_ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.6M12 18.9v2.6M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12h2.6M18.9 12h2.6M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>';
 const THEME_ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5z"/></svg>';
@@ -112,6 +121,13 @@ function bindThemeToggles() {
     btn.addEventListener('click', toggleTheme);
   });
   applyTheme(getTheme());
+  // #41: if the user hasn't chosen a theme, react live to OS theme changes.
+  try {
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const onChange = () => { if (!localStorage.getItem(THEME_KEY)) { applyTheme(systemTheme()); redrawChartsForTheme(); } };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+  } catch {}
 }
 
 // ---------------- Chart.js theme helpers ----------------
@@ -166,6 +182,7 @@ function showLogin() {
   const login = document.getElementById('loginScreen');
   if (app) app.classList.add('hidden');
   if (login) login.classList.remove('hidden');
+  applyLanguage();
 }
 
 function showApp() {
@@ -176,7 +193,9 @@ function showApp() {
   renderNav();
   renderNotificationBell();
   renderGlobalSearchButton();
+  renderLangToggle();
   if (typeof startPage === 'function') startPage();
+  applyLanguage();
 }
 
 function renderNav() {
@@ -551,6 +570,30 @@ function readDateRange(fromId, toId) {
   return { from, to };
 }
 
+// ---------------- Saved filters (#47) ----------------
+// Persists the values of the given input/select ids under a page key so a
+// user's date range / dropdown choices survive reloads and navigation.
+function saveFilterState(key, ids) {
+  try {
+    const state = {};
+    ids.forEach((id) => { const el = document.getElementById(id); if (el) state[id] = el.value; });
+    localStorage.setItem('aqba_filter_' + key, JSON.stringify(state));
+  } catch {}
+}
+function restoreFilterState(key, ids) {
+  try {
+    const raw = localStorage.getItem('aqba_filter_' + key);
+    if (!raw) return false;
+    const state = JSON.parse(raw);
+    let any = false;
+    ids.forEach((id) => { const el = document.getElementById(id); if (el && state[id] != null && state[id] !== '') { el.value = state[id]; any = true; } });
+    return any;
+  } catch { return false; }
+}
+function clearFilterState(key) {
+  try { localStorage.removeItem('aqba_filter_' + key); } catch {}
+}
+
 function downloadCsv(path, filename) {
   const a = document.createElement('a');
   a.href = API + path;
@@ -640,6 +683,156 @@ if (!window.__gsearchBound) {
       if (app && !app.classList.contains('hidden')) { e.preventDefault(); openGlobalSearch(); }
     }
   });
+}
+
+// ---------------- Language toggle RU/EN (#44) ----------------
+// Lightweight i18n: translates the static interface chrome (navigation, page
+// titles, buttons, section headers/hints) via a RU→EN dictionary applied over
+// the DOM. Dynamic data from iiko (dish names, numbers) stays as-is. Toggling
+// persists the choice and reloads so translation re-applies cleanly.
+const LANG_KEY = 'aqba_lang';
+function getLang() { try { return localStorage.getItem(LANG_KEY) || 'ru'; } catch { return 'ru'; } }
+const I18N_EN = {
+  // nav
+  'Обзор': 'Overview', 'Продажи': 'Sales', 'Меню': 'Menu', 'Филиалы': 'Branches',
+  'Оплаты и скидки': 'Payments & discounts', 'Гости': 'Guests', 'Сотрудники': 'Employees',
+  'Явки сотрудников': 'Attendance', 'Склад': 'Warehouse', 'Опасные операции': 'Risky operations',
+  'Настройки': 'Settings',
+  // page titles / header
+  'Опасные операции на кассе': 'Risky POS operations', 'Аналитика iikoRMS / iikoServer': 'iikoRMS / iikoServer analytics',
+  'Проверка...': 'Checking...', 'Сервер недоступен': 'Server unavailable', 'Выйти': 'Log out', 'Войти': 'Log in',
+  // common buttons / controls
+  'Применить': 'Apply', 'Сбросить': 'Reset', 'Рассчитать': 'Calculate', 'Экспорт CSV': 'Export CSV',
+  'Отмена': 'Cancel', 'Подтвердить': 'Confirm', 'Назад': 'Back', 'Вперёд': 'Next', 'Все сотрудники': 'All employees',
+  '7 дней': '7 days', '14 дней': '14 days', '30 дней': '30 days', '90 дней': '90 days',
+  // section headers (most visible)
+  'Динамика выручки и чеков': 'Revenue & checks trend', 'Средний чек — динамика': 'Average check — trend',
+  'Год к году': 'Year over year', 'План / факт': 'Plan / actual', 'Эффективность по сменам': 'Shift efficiency',
+  'По дням недели': 'By weekday', 'Активность по часам': 'Hourly activity', 'Топ блюд': 'Top dishes',
+  'Аутсайдеры меню': 'Menu laggards', 'Маржинальность блюд': 'Dish margins', 'Повторы блюд в чеке': 'Repeat dishes per check',
+  'Причины списаний блюд': 'Write-off reasons', 'Фильтры': 'Filters', 'Журнал явок': 'Attendance log',
+  'Аномалии по сменам': 'Shift anomalies', 'Выручка': 'Revenue', 'Чеки': 'Checks', 'Средний чек': 'Average check',
+  'Загрузка...': 'Loading...',
+  // login
+  'Адрес сервера': 'Server address', 'Логин': 'Login', 'Пароль': 'Password',
+};
+function applyLanguage() {
+  if (getLang() !== 'en') return;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((n) => {
+    const p = n.parentNode; if (!p) return;
+    if (p.nodeName === 'SCRIPT' || p.nodeName === 'STYLE') return;
+    const key = n.nodeValue.trim();
+    if (key && I18N_EN[key] != null) n.nodeValue = n.nodeValue.replace(key, I18N_EN[key]);
+  });
+  document.querySelectorAll('[placeholder],[title],[aria-label]').forEach((el) => {
+    ['placeholder', 'title', 'aria-label'].forEach((a) => {
+      const v = el.getAttribute(a); if (v && I18N_EN[v.trim()] != null) el.setAttribute(a, I18N_EN[v.trim()]);
+    });
+  });
+  document.documentElement.setAttribute('lang', 'en');
+}
+function renderLangToggle() {
+  const headerRight = document.querySelector('.header-right');
+  if (!headerRight || document.getElementById('langToggleBtn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'langToggleBtn';
+  btn.type = 'button';
+  btn.className = 'theme-toggle lang-toggle';
+  const lang = getLang();
+  btn.textContent = lang === 'en' ? 'RU' : 'EN';
+  btn.title = lang === 'en' ? 'Переключить на русский' : 'Switch to English';
+  headerRight.insertBefore(btn, headerRight.firstChild);
+  btn.addEventListener('click', () => {
+    try { localStorage.setItem(LANG_KEY, getLang() === 'en' ? 'ru' : 'en'); } catch {}
+    window.location.reload();
+  });
+}
+
+// ---------------- Widget board: pin (#42) + drag-reorder (#43) ----------------
+// Turns a grid of tiles (each carrying data-widget) into a personalisable
+// board: drag to reorder, star to pin to the front. Order + pins persist per
+// board key in localStorage. Purely client-side layout preference.
+function pinIconSvg() {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M5 3h14l-2 9H7z"/><path d="M7 12h10"/></svg>';
+}
+function widgetGetDragAfter(container, x, y) {
+  const els = Array.from(container.querySelectorAll('.widget-tile:not(.dragging)'));
+  let closest = { dist: Infinity, el: null };
+  els.forEach((el) => {
+    const box = el.getBoundingClientRect();
+    const d = Math.hypot(x - (box.left + box.width / 2), y - (box.top + box.height / 2));
+    if (d < closest.dist) closest = { dist: d, el };
+  });
+  if (!closest.el) return null;
+  const box = closest.el.getBoundingClientRect();
+  const isAfter = x > box.left + box.width / 2 || y > box.top + box.height / 2;
+  return isAfter ? closest.el.nextSibling : closest.el;
+}
+function initWidgetBoard(grid, storageKey) {
+  if (!grid) return;
+  const tiles = Array.from(grid.children).filter((el) => el.dataset && el.dataset.widget);
+  if (!tiles.length) return;
+  const byKey = {};
+  tiles.forEach((t) => { byKey[t.dataset.widget] = t; });
+  const lsKey = 'aqba_board_' + storageKey;
+  let state = { order: [], pinned: [] };
+  try { const raw = localStorage.getItem(lsKey); if (raw) state = Object.assign(state, JSON.parse(raw)); } catch {}
+  const isPinned = (k) => state.pinned.includes(k);
+  const save = () => {
+    const order = Array.from(grid.children).filter((el) => el.dataset && el.dataset.widget).map((el) => el.dataset.widget);
+    try { localStorage.setItem(lsKey, JSON.stringify({ order, pinned: state.pinned })); } catch {}
+  };
+  function reflow() {
+    const cur = Array.from(grid.children).filter((el) => el.dataset && el.dataset.widget).map((el) => el.dataset.widget);
+    const pinnedOrdered = state.pinned.filter((k) => byKey[k]);
+    const rest = cur.filter((k) => !isPinned(k));
+    [...pinnedOrdered, ...rest].forEach((k) => grid.appendChild(byKey[k]));
+    tiles.forEach((t) => t.classList.toggle('pinned', isPinned(t.dataset.widget)));
+  }
+  tiles.forEach((t) => {
+    t.setAttribute('draggable', 'true');
+    t.classList.add('widget-tile');
+    if (!t.querySelector('.widget-pin')) {
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = 'widget-pin';
+      pin.setAttribute('aria-label', 'Закрепить виджет');
+      pin.innerHTML = pinIconSvg();
+      t.appendChild(pin);
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const k = t.dataset.widget;
+        state.pinned = isPinned(k) ? state.pinned.filter((x) => x !== k) : [...state.pinned, k];
+        reflow();
+        save();
+      });
+    }
+    t.addEventListener('dragstart', (e) => { t.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', t.dataset.widget); } catch {} });
+    t.addEventListener('dragend', () => { t.classList.remove('dragging'); save(); });
+  });
+  grid.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const dragging = grid.querySelector('.widget-tile.dragging');
+    if (!dragging) return;
+    const after = widgetGetDragAfter(grid, e.clientX, e.clientY);
+    if (after == null) grid.appendChild(dragging);
+    else grid.insertBefore(dragging, after);
+  });
+  // apply saved order, then pinned-first
+  const saved = state.order && state.order.length ? state.order : tiles.map((t) => t.dataset.widget);
+  const seen = new Set();
+  saved.forEach((k) => { if (byKey[k]) { grid.appendChild(byKey[k]); seen.add(k); } });
+  tiles.forEach((t) => { if (!seen.has(t.dataset.widget)) grid.appendChild(t); });
+  reflow();
+}
+
+// #49 PWA: register the service worker (offline shell). Best-effort — a
+// failure (e.g. served over plain http on an insecure origin) is silent.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
 
 document.addEventListener('DOMContentLoaded', bootShared);
