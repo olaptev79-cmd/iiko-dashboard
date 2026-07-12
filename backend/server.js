@@ -424,6 +424,20 @@ app.get(
 // Feature: Average Check Analytics
 app.get("/api/average-check", requireAuth, wrap((r) => svc.getAverageCheckAnalytics(r.client)));
 
+// Feature: Average-check trend (#10) + Year-over-year (#9) + Plan/fact (#1)
+app.get("/api/average-check-trend", requireAuth, wrap((r) => svc.getAverageCheckTrend(r.client, clampDays(r.query.days, 30))));
+app.get("/api/year-over-year", requireAuth, wrap((r) => svc.getYearOverYear(r.client, clampDays(r.query.days, 30))));
+app.get(
+  "/api/plan-fact",
+  requireAuth,
+  (req, res, next) => {
+    const err = validateDateRangeParams(req.query.from, req.query.to);
+    if (err) return res.status(400).json({ error: err });
+    next();
+  },
+  wrap((r) => svc.getSalesPlanFact(r.client, r.query.from, r.query.to, r.query.plan))
+);
+
 // ---------------- Dashboard admin: users/roles + audit log ----------------
 // Dashboard-UI permissions only (see userStore.js) — separate from iiko's
 // own role model. Every dashboard login gets a viewer/editor/admin role

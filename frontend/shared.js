@@ -175,6 +175,7 @@ function showApp() {
   if (app) app.classList.remove('hidden');
   renderNav();
   renderNotificationBell();
+  renderGlobalSearchButton();
   if (typeof startPage === 'function') startPage();
 }
 
@@ -573,6 +574,72 @@ async function bootShared() {
   } catch {
     showLogin();
   }
+}
+
+// ---------------- Global quick search / command palette (#46) ----------------
+// Client-side navigation aid over the same PAGES list the nav uses (role-
+// filtered identically). Purely a UX shortcut — no new data, no server call.
+function renderGlobalSearchButton() {
+  const headerRight = document.querySelector('.header-right');
+  if (!headerRight || document.getElementById('gsearchBtn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'gsearchBtn';
+  btn.type = 'button';
+  btn.className = 'theme-toggle gsearch-btn';
+  btn.setAttribute('aria-label', 'Поиск по разделам');
+  btn.title = 'Поиск (Ctrl+K)';
+  btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>';
+  headerRight.insertBefore(btn, headerRight.firstChild);
+  btn.addEventListener('click', openGlobalSearch);
+}
+
+function openGlobalSearch() {
+  const pages = PAGES.filter(p => !p.minRole || roleAtLeast(currentUserRole, p.minRole));
+  openModal({
+    title: 'Поиск по разделам',
+    bodyHtml:
+      '<input id="gsearchInput" class="gsearch-input" type="text" placeholder="Начните вводить: продажи, гости, склад…" autocomplete="off"/>' +
+      '<ul class="gsearch-results" id="gsearchResults"></ul>',
+    onMount: (modalEl) => {
+      const input = modalEl.querySelector('#gsearchInput');
+      const list = modalEl.querySelector('#gsearchResults');
+      let active = 0;
+      let filtered = pages;
+      const render = () => {
+        const q = input.value.trim().toLowerCase();
+        filtered = q ? pages.filter(p => p.label.toLowerCase().includes(q) || p.short.toLowerCase().includes(q)) : pages;
+        if (active >= filtered.length) active = Math.max(0, filtered.length - 1);
+        if (!filtered.length) { list.innerHTML = '<li class="gsearch-empty">Ничего не найдено</li>'; return; }
+        list.innerHTML = filtered.map((p, i) =>
+          '<li class="gsearch-item' + (i === active ? ' active' : '') + '" data-href="' + p.href + '">' +
+          '<span class="gs-icon">' + p.icon + '</span><span>' + esc(p.label) + '</span></li>'
+        ).join('');
+      };
+      render();
+      input.focus();
+      input.addEventListener('input', render);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, filtered.length - 1); render(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); render(); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (filtered[active]) window.location.href = filtered[active].href; }
+      });
+      list.addEventListener('click', (e) => {
+        const item = e.target.closest('.gsearch-item');
+        if (item) window.location.href = item.dataset.href;
+      });
+    },
+  });
+}
+
+// Ctrl/Cmd+K opens the palette from anywhere inside the authenticated app.
+if (!window.__gsearchBound) {
+  window.__gsearchBound = true;
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      const app = document.getElementById('appScreen');
+      if (app && !app.classList.contains('hidden')) { e.preventDefault(); openGlobalSearch(); }
+    }
+  });
 }
 
 document.addEventListener('DOMContentLoaded', bootShared);

@@ -85,6 +85,34 @@
 </div>
 </div>
 
+<div class="card">
+<h2>Средний чек — динамика<span class="hint" id="avgTrendHint">средний чек по дням</span></h2>
+<div class="period-btns">
+<button class="period-btn" data-avgdays="7">7 дней</button>
+<button class="period-btn" data-avgdays="14">14 дней</button>
+<button class="period-btn active" data-avgdays="30">30 дней</button>
+<button class="period-btn" data-avgdays="90">90 дней</button>
+</div>
+<canvas id="chartAvgTrend" height="90"></canvas>
+</div>
+
+<div class="charts-grid-even">
+<div class="card">
+<h2>Год к году<span class="hint">30 дней против тех же 30 дней год назад</span></h2>
+<div id="yoyContainer"><div class="loading">Загрузка...</div></div>
+</div>
+<div class="card">
+<h2>План / факт<span class="hint">сравнение выручки за период с планом</span></h2>
+<div class="date-range-row">
+<div class="field"><label for="pfFrom">С</label><input id="pfFrom" type="date"/></div>
+<div class="field"><label for="pfTo">По</label><input id="pfTo" type="date"/></div>
+<div class="field"><label for="pfPlan">План выручки, ₽</label><input id="pfPlan" type="number" min="0" step="1000" placeholder="например, 500000"/></div>
+</div>
+<button type="button" class="btn-primary" id="pfBtn" style="width:auto;margin-top:4px;">Рассчитать</button>
+<div id="planFactResult" style="margin-top:16px;"></div>
+</div>
+</div>
+
 </div>
 </div>
 </div>

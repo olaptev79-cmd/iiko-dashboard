@@ -1175,6 +1175,75 @@ async function getAverageCheckAnalytics(client) {
   };
 }
 
+// --- Average-check trend (#10): daily average ticket over a rolling window ---
+//
+// Same avg-check definition as getAverageCheckAnalytics (revenue / DishAmountInt),
+// just resolved per calendar day so the two views never disagree. Reuses the
+// existing getOlapSales() call — no new iiko API surface.
+async function getAverageCheckTrend(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const raw = await client.getOlapSales(from, to);
+  const byDate = {};
+  client.parseOlap(raw).forEach((r) => {
+    const d = (r["OpenDate.Typed"] || "").slice(0, 10);
+    if (!d) return;
+    if (!byDate[d]) byDate[d] = { revenue: 0, orders: 0 };
+    byDate[d].revenue += parseFloat(r["DishSumInt"] || 0);
+    byDate[d].orders += parseInt(r["DishAmountInt"] || 0, 10);
+  });
+  const labels = Object.keys(byDate).sort();
+  const avgCheck = labels.map((d) => (byDate[d].orders > 0 ? +(byDate[d].revenue / byDate[d].orders).toFixed(2) : 0));
+  const totalOrders = labels.reduce((s, d) => s + byDate[d].orders, 0);
+  const totalRevenue = labels.reduce((s, d) => s + byDate[d].revenue, 0);
+  return {
+    labels,
+    avgCheck,
+    overallAvg: totalOrders > 0 ? +(totalRevenue / totalOrders).toFixed(2) : 0,
+    source: "live",
+  };
+}
+
+// --- Year-over-year (#9/#48): current N-day window vs the same window a year ago ---
+async function getYearOverYear(client, days = 30) {
+  const cur = daysRange(days);
+  const prevYear = daysRange(days, 365);
+  const [curRes, prevRes] = await Promise.allSettled([
+    client.getOlapSales(cur.from, cur.to),
+    client.getOlapSales(prevYear.from, prevYear.to),
+  ]);
+  const agg = (res) => (res.status === "fulfilled" && res.value ? aggregateSales(client, res.value) : { revenue: 0, orders: 0 });
+  const curAgg = agg(curRes);
+  const prevAgg = agg(prevRes);
+  return {
+    days,
+    current: { revenue: +curAgg.revenue.toFixed(2), orders: curAgg.orders, from: cur.from, to: cur.to },
+    lastYear: { revenue: +prevAgg.revenue.toFixed(2), orders: prevAgg.orders, from: prevYear.from, to: prevYear.to },
+    revenueChangePct: pctChange(curAgg.revenue, prevAgg.revenue),
+    ordersChangePct: pctChange(curAgg.orders, prevAgg.orders),
+    source: "live",
+  };
+}
+
+// --- Plan vs fact for an arbitrary period (#1) ---
+// iiko carries no revenue "plan" of its own, so the target is supplied by the
+// operator (query param). Everything else is real OLAP fact for [from, to].
+async function getSalesPlanFact(client, from, to, plan) {
+  const raw = await client.getOlapSales(from, exclusiveTo(to));
+  const { revenue, orders } = aggregateSales(client, raw);
+  const fact = +revenue.toFixed(2);
+  const planNum = Number(plan) > 0 ? Number(plan) : 0;
+  return {
+    from,
+    to,
+    plan: planNum,
+    fact,
+    orders,
+    completionPct: planNum > 0 ? +((fact / planNum) * 100).toFixed(1) : null,
+    remaining: planNum > 0 ? +(planNum - fact).toFixed(2) : null,
+    source: "live",
+  };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -1196,4 +1265,7 @@ module.exports = {
   getAttendance,
   getGuestAnalytics,
   getAverageCheckAnalytics,
+  getAverageCheckTrend,
+  getYearOverYear,
+  getSalesPlanFact,
 };
