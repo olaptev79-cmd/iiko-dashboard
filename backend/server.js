@@ -455,6 +455,14 @@ app.get("/api/dish-combos", requireAuth, wrap((r) => svc.getDishCombos(r.client,
 app.get("/api/gamification", requireAuth, wrap((r) => svc.getEmployeeGamification(r.client, clampDays(r.query.days, 30))));
 app.get("/api/pnl", requireAuth, wrap((r) => svc.getSimplePnl(r.client, clampDays(r.query.days, 30))));
 app.get("/api/register-heatmap", requireAuth, wrap((r) => svc.getRegisterHeatmap(r.client, clampDays(r.query.days, 30))));
+
+// Wave 5: speculative module-dependent reports (tips #19, guest type #22,
+// segmentation #21, document reminders #20, expiry #27) — graceful by design
+app.get("/api/tips", requireAuth, wrap((r) => svc.getTips(r.client, clampDays(r.query.days, 30))));
+app.get("/api/avg-check-by-guest-type", requireAuth, wrap((r) => svc.getAvgCheckByGuestType(r.client, clampDays(r.query.days, 30))));
+app.get("/api/guest-segmentation", requireAuth, wrap((r) => svc.getGuestSegmentation(r.client, clampDays(r.query.days, 30))));
+app.get("/api/document-reminders", requireAuth, wrap((r) => svc.getDocumentReminders(r.client)));
+app.get("/api/expiring-products", requireAuth, wrap((r) => svc.getExpiringProducts(r.client)));
 app.get(
   "/api/attendance-anomalies",
   requireAuth,

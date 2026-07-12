@@ -1663,6 +1663,109 @@ async function getRegisterHeatmap(client, days = 30) {
   return { available: true, cashiers, maxCell, source: "live" };
 }
 
+// ================= Wave 5: module-dependent (speculative) reports =================
+// Each depends on an iiko module/field that may not exist on a given install.
+// They discover the needed field and honestly degrade to { available:false,
+// requiresModule } rather than fabricating numbers. On a server that DOES have
+// the module, they return real aggregates.
+
+// --- #19 Tips by waiter ---
+const TIP_FIELD_PATTERNS = [/^Tips?Sum/i, /Gratuity/i, /Чаев/i, /^Tips?$/i];
+async function getTips(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const colsRes = await safe(() => getSalesColumns(client));
+  const tipField = colsRes.ok ? pickField(colsRes.value.names, TIP_FIELD_PATTERNS) : null;
+  if (!tipField) return { available: false, requiresModule: "учёт чаевых в iiko", error: "Поле чаевых не найдено в отчёте по продажам", waiters: [] };
+  const waiterField = colsRes.ok ? pickField(colsRes.value.names, WAITER_FIELD_PATTERNS) : null;
+  const res = await safe(() => client.getOlapSalesCustom(from, to, [waiterField].filter(Boolean), [tipField]));
+  if (!res.ok) return { available: false, requiresModule: "учёт чаевых в iiko", error: res.error, waiters: [] };
+  const byWaiter = {};
+  let total = 0;
+  client.parseOlap(res.value).forEach((r) => {
+    const w = (waiterField && r[waiterField]) || "Не указано";
+    const tip = parseFloat(r[tipField] || 0);
+    byWaiter[w] = (byWaiter[w] || 0) + tip;
+    total += tip;
+  });
+  const waiters = Object.entries(byWaiter).map(([name, sum]) => ({ name, tips: +sum.toFixed(2) })).sort((a, b) => b.tips - a.tips);
+  return { available: true, total: +total.toFixed(2), waiters, source: "live" };
+}
+
+// --- #22 Average check by guest type ---
+const GUEST_TYPE_FIELD_PATTERNS = [/^GuestType/i, /^OrderCategory/i, /ТипГост/i, /GuestCategory/i];
+async function getAvgCheckByGuestType(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const colsRes = await safe(() => getSalesColumns(client));
+  const typeField = colsRes.ok ? pickField(colsRes.value.names, GUEST_TYPE_FIELD_PATTERNS) : null;
+  if (!typeField) return { available: false, requiresModule: "категории гостей в iiko", error: "Поле типа гостя не найдено", types: [] };
+  const res = await safe(() => client.getOlapSalesCustom(from, to, [typeField], ["DishSumInt", "DishAmountInt"]));
+  if (!res.ok) return { available: false, requiresModule: "категории гостей в iiko", error: res.error, types: [] };
+  const byType = {};
+  client.parseOlap(res.value).forEach((r) => {
+    const t = r[typeField] || "Не указано";
+    if (!byType[t]) byType[t] = { revenue: 0, orders: 0 };
+    byType[t].revenue += parseFloat(r["DishSumInt"] || 0);
+    byType[t].orders += parseInt(r["DishAmountInt"] || 0, 10);
+  });
+  const types = Object.entries(byType).map(([name, v]) => ({ name, revenue: +v.revenue.toFixed(2), orders: v.orders, avgCheck: v.orders > 0 ? +(v.revenue / v.orders).toFixed(2) : 0 })).sort((a, b) => b.revenue - a.revenue);
+  return { available: true, types, source: "live" };
+}
+
+// --- #21 Guest segmentation: new vs returning (loyalty) ---
+const GUEST_CARD_FIELD_PATTERNS = [/LoyaltyCard/i, /GuestCard/i, /CardNumber/i, /Guest\.?Id/i, /ClientId/i];
+async function getGuestSegmentation(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const colsRes = await safe(() => getSalesColumns(client));
+  const cardField = colsRes.ok ? pickField(colsRes.value.names, GUEST_CARD_FIELD_PATTERNS) : null;
+  if (!cardField) return { available: false, requiresModule: "модуль лояльности iiko", error: "Идентификатор гостя/карты не найден" };
+  const res = await safe(() => client.getOlapSalesCustom(from, to, [cardField, "OpenDate.Typed"], ["DishSumInt"]));
+  if (!res.ok) return { available: false, requiresModule: "модуль лояльности iiko", error: res.error };
+  const visitsByCard = {};
+  client.parseOlap(res.value).forEach((r) => {
+    const card = r[cardField];
+    if (!card) return;
+    const d = (r["OpenDate.Typed"] || "").slice(0, 10);
+    if (!visitsByCard[card]) visitsByCard[card] = new Set();
+    if (d) visitsByCard[card].add(d);
+  });
+  const cards = Object.values(visitsByCard);
+  const returning = cards.filter((s) => s.size > 1).length;
+  const newGuests = cards.length - returning;
+  return { available: true, totalGuests: cards.length, newGuests, returning, returnRate: cards.length > 0 ? +((returning / cards.length) * 100).toFixed(1) : 0, source: "live" };
+}
+
+// --- #20 Employee document reminders (HR) ---
+const DOC_DATE_FIELD_PATTERNS = [/medical.*(book|expir)/i, /contract.*(end|expir)/i, /document.*expir/i, /мед.*книжк/i, /договор.*оконч/i];
+async function getDocumentReminders(client) {
+  const res = await safe(() => client.getEmployees());
+  if (!res.ok) return { available: false, requiresModule: "кадровые данные iiko", error: res.error, reminders: [] };
+  const items = Array.isArray(res.value) ? res.value : (res.value && res.value.items) || [];
+  if (!items.length) return { available: false, requiresModule: "кадровые данные iiko", error: "Справочник сотрудников пуст", reminders: [] };
+  const keys = Object.keys(items[0] || {});
+  const docField = pickField(keys, DOC_DATE_FIELD_PATTERNS);
+  if (!docField) return { available: false, requiresModule: "сроки документов сотрудников в iiko", error: "Поля со сроками документов не найдены в справочнике", reminders: [] };
+  const now = Date.now();
+  const soon = 30 * 86400000;
+  const reminders = items.map((e) => ({ name: [e.lastName, e.firstName].filter(Boolean).join(" ") || e.name || "—", expires: e[docField] })).filter((x) => {
+    const t = Date.parse(x.expires);
+    return !isNaN(t) && t - now < soon;
+  }).sort((a, b) => Date.parse(a.expires) - Date.parse(b.expires));
+  return { available: true, reminders, source: "live" };
+}
+
+// --- #27 Products nearing expiry (shelf-life) ---
+const EXPIRY_FIELD_PATTERNS = [/Expir/i, /ShelfLife/i, /Годн/i, /BestBefore/i];
+async function getExpiringProducts(client) {
+  const res = await safe(() => getTransactionColumns(client));
+  const field = res.ok ? pickField(res.value.names, EXPIRY_FIELD_PATTERNS) : null;
+  if (!field) {
+    return { available: false, requiresModule: "складской учёт со сроками годности в iiko", error: "Поля со сроками годности нет в складском отчёте", items: [] };
+  }
+  // Field exists but building a correct expiry query needs install-specific
+  // knowledge; surface availability honestly for the operator to wire up.
+  return { available: false, requiresModule: "складской учёт со сроками годности", error: "Поле сроков годности обнаружено (" + field + "), но требует настройки под вашу инсталляцию", items: [] };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -1699,4 +1802,9 @@ module.exports = {
   getEmployeeGamification,
   getSimplePnl,
   getRegisterHeatmap,
+  getTips,
+  getAvgCheckByGuestType,
+  getGuestSegmentation,
+  getDocumentReminders,
+  getExpiringProducts,
 };

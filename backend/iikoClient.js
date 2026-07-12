@@ -475,6 +475,21 @@ class IikoClient {
     });
   }
 
+  /** Generic SALES OLAP query with a date filter — used by the speculative
+   *  Wave-5 reports whose fields (tips, guest type, loyalty card) are resolved
+   *  dynamically and may not exist. Throws on unknown fields → caller degrades. */
+  async getOlapSalesCustom(from, to, groupByRowFields, aggregateFields) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: false,
+      groupByRowFields,
+      aggregateFields,
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
   /** Sales grouped by hour of day (0-23) — powers the hourly activity heatmap. */
   async getOlapHourly(from, to) {
     return this.olapPost({

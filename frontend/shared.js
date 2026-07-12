@@ -40,6 +40,8 @@ const PAGES = [
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>' },
   { href: 'risky.html', label: 'Опасные операции', short: 'Риски',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 1 21h22z"/><path d="M12 9v5"/><circle cx="12" cy="17.2" r="0.4" fill="currentColor"/></svg>' },
+  { href: 'extra.html', label: 'Доп. модули', short: 'Доп.',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' },
   { href: 'settings.html', label: 'Настройки', short: 'Настройки', minRole: 'admin',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
 ];
@@ -697,7 +699,7 @@ const I18N_EN = {
   'Обзор': 'Overview', 'Продажи': 'Sales', 'Меню': 'Menu', 'Филиалы': 'Branches',
   'Оплаты и скидки': 'Payments & discounts', 'Гости': 'Guests', 'Сотрудники': 'Employees',
   'Явки сотрудников': 'Attendance', 'Склад': 'Warehouse', 'Опасные операции': 'Risky operations',
-  'Настройки': 'Settings',
+  'Настройки': 'Settings', 'Доп. модули': 'Add-ons', 'Дополнительные модули': 'Add-on modules',
   // page titles / header
   'Опасные операции на кассе': 'Risky POS operations', 'Аналитика iikoRMS / iikoServer': 'iikoRMS / iikoServer analytics',
   'Проверка...': 'Checking...', 'Сервер недоступен': 'Server unavailable', 'Выйти': 'Log out', 'Войти': 'Log in',
