@@ -18,6 +18,16 @@ const snapshotStore = require("./snapshotStore");
 const assistant = require("./assistant");
 
 const app = express();
+// Backend всегда стоит за ОДНИМ прокси — nginx из этого же docker-compose,
+// который проставляет X-Forwarded-For (см. frontend/nginx.conf). Без
+// trust proxy Express игнорирует этот заголовок: req.ip у ВСЕХ запросов
+// равен внутреннему IP nginx-контейнера, из-за чего (1) все пользователи
+// делят один общий бакет rate-limit (10 неудачных входов ЛЮБОГО клиента
+// блокировали всех сразу), (2) в журнале аудита вместо реальных IP писался
+// бесполезный внутренний адрес, (3) express-rate-limit сыпал
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR в лог. Значение 1 = доверять ровно
+// одному прыжку (нашему nginx), не произвольным заголовкам клиента.
+app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3001;
 const COOKIE_NAME = "aqba_sid";
 // The `Secure` cookie flag must match how the app is actually served, not
