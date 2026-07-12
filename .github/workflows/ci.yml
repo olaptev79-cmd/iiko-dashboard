@@ -37,6 +37,30 @@ jobs:
         working-directory: ./backend
         run: node --check sessionStore.js
 
+      - name: Check JS syntax (userStore.js)
+        working-directory: ./backend
+        run: node --check userStore.js
+
+      - name: Check JS syntax (auditLog.js)
+        working-directory: ./backend
+        run: node --check auditLog.js
+
+      - name: Check JS syntax (notifier.js)
+        working-directory: ./backend
+        run: node --check notifier.js
+
+      - name: Check JS syntax (tokenStore.js)
+        working-directory: ./backend
+        run: node --check tokenStore.js
+
+      - name: Check JS syntax (totp.js)
+        working-directory: ./backend
+        run: node --check totp.js
+
+      - name: Check JS syntax (scheduler.js)
+        working-directory: ./backend
+        run: node --check scheduler.js
+
       - name: Create stub .env for docker-compose validation
         run: cp .env.example .env
 

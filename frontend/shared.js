@@ -3,6 +3,18 @@ const API = window.location.hostname === 'localhost' && window.location.port ===
 const LS_KEY = 'aqba_login_prefs';
 const THEME_KEY = 'aqba_theme';
 
+// Dashboard-own role (viewer/editor/admin, see backend/userStore.js) —
+// separate from whatever role the login has inside iiko itself. Cached
+// after /api/auth/me on boot; used only to filter which nav items render,
+// never as the actual security boundary (that's requireRole() server-side —
+// hiding a nav link doesn't stop a direct API call, by design, same
+// precedent as every other client-side check in this app).
+let currentUserRole = 'viewer';
+const ROLE_RANK = { viewer: 0, editor: 1, admin: 2 };
+function roleAtLeast(role, min) {
+  return (ROLE_RANK[role] ?? -1) >= (ROLE_RANK[min] ?? Infinity);
+}
+
 // Each page carries a short inline SVG icon (no external icon library, per
 // design brief) plus a `short` label used in the constrained mobile bottom
 // tab bar. The first 4 entries + a synthetic "Ещё" (More) button make up the
@@ -18,12 +30,18 @@ const PAGES = [
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V9l7-5 7 5v12"/><path d="M10 21v-6h4v6"/></svg>' },
   { href: 'payments.html', label: 'Оплаты и скидки', short: 'Оплаты',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg>' },
+  { href: 'guests.html', label: 'Гости', short: 'Гости',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>' },
   { href: 'employees.html', label: 'Сотрудники', short: 'Кадры',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17.5" cy="7.5" r="2.3"/><path d="M16 14.3c2.6.4 4.5 2.4 4.5 5.2"/></svg>' },
+  { href: 'attendance.html', label: 'Явки сотрудников', short: 'Явки',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="m9 16 2 2 4-4"/></svg>' },
   { href: 'warehouse.html', label: 'Склад', short: 'Склад',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>' },
   { href: 'risky.html', label: 'Опасные операции', short: 'Риски',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 1 21h22z"/><path d="M12 9v5"/><circle cx="12" cy="17.2" r="0.4" fill="currentColor"/></svg>' },
+  { href: 'settings.html', label: 'Настройки', short: 'Настройки', minRole: 'admin',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>' },
 ];
 
 // First N items shown directly in the mobile bottom bar; the rest collapse
@@ -156,16 +174,21 @@ function showApp() {
   if (login) login.classList.add('hidden');
   if (app) app.classList.remove('hidden');
   renderNav();
+  renderNotificationBell();
   if (typeof startPage === 'function') startPage();
 }
 
 function renderNav() {
   const current = window.location.pathname.split('/').pop() || 'index.html';
+  // Hiding a nav item is a UX nicety, not the security boundary — the
+  // matching server route is the real gate (requireRole in server.js).
+  // Same precedent as every other client-side check in this app.
+  const visiblePages = PAGES.filter(p => !p.minRole || roleAtLeast(currentUserRole, p.minRole));
 
   // ---- Desktop / tablet sidebar ----
   const sideNav = document.getElementById('mainNav');
   if (sideNav) {
-    sideNav.innerHTML = PAGES.map(p =>
+    sideNav.innerHTML = visiblePages.map(p =>
       `<a href="${p.href}" class="${p.href === current ? 'active' : ''}" title="${esc(p.label)}">` +
       `<span class="nav-icon">${p.icon}</span><span class="nav-label">${esc(p.label)}</span></a>`
     ).join('');
@@ -174,8 +197,8 @@ function renderNav() {
   // ---- Mobile bottom tab bar (first N items + "Ещё") ----
   const bottomNav = document.getElementById('bottomNav');
   if (bottomNav) {
-    const primary = PAGES.slice(0, BOTTOM_NAV_PRIMARY_COUNT);
-    const rest = PAGES.slice(BOTTOM_NAV_PRIMARY_COUNT);
+    const primary = visiblePages.slice(0, BOTTOM_NAV_PRIMARY_COUNT);
+    const rest = visiblePages.slice(BOTTOM_NAV_PRIMARY_COUNT);
     const restHasActive = rest.some(p => p.href === current);
     let html = primary.map(p =>
       `<a href="${p.href}" class="${p.href === current ? 'active' : ''}">` +
@@ -218,6 +241,86 @@ function renderNav() {
   }
 }
 
+// ---------------- Notification bell (#45) ----------------
+// Thin UI over the Wave-1 audit log (backend/auditLog.js) — admin-only,
+// same data sensitivity as the Settings page's audit table. Injected into
+// the header dynamically (like the bell/theme-toggle chrome) instead of
+// duplicating markup across all pages.
+const BELL_LAST_SEEN_KEY = 'aqba_bell_last_seen';
+
+function renderNotificationBell() {
+  const headerRight = document.querySelector('.header-right');
+  if (!headerRight) return;
+  let btn = document.getElementById('notifBellBtn');
+  if (currentUserRole !== 'admin') {
+    if (btn) btn.remove();
+    return;
+  }
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'notifBellBtn';
+    btn.type = 'button';
+    btn.className = 'theme-toggle notif-bell';
+    btn.setAttribute('aria-label', 'Уведомления');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="notif-badge hidden" id="notifBadge">0</span>';
+    headerRight.insertBefore(btn, headerRight.firstChild);
+    btn.addEventListener('click', toggleNotifPanel);
+  }
+  refreshNotifBadge();
+}
+
+async function refreshNotifBadge() {
+  if (currentUserRole !== 'admin') return;
+  try {
+    const d = await api('/api/admin/audit-log?limit=50');
+    const lastSeen = localStorage.getItem(BELL_LAST_SEEN_KEY) || '';
+    const unread = d.events.filter((e) => e.ts > lastSeen).length;
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    if (unread > 0) {
+      badge.textContent = unread > 9 ? '9+' : String(unread);
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  } catch { /* not admin / not authenticated yet — bell just stays at 0 */ }
+}
+
+async function toggleNotifPanel() {
+  let panel = document.getElementById('notifPanel');
+  if (panel) { panel.remove(); document.removeEventListener('click', notifOutsideClickHandler); return; }
+  panel = document.createElement('div');
+  panel.id = 'notifPanel';
+  panel.className = 'notif-panel';
+  panel.innerHTML = '<div class="loading">Загрузка...</div>';
+  document.body.appendChild(panel);
+  const btn = document.getElementById('notifBellBtn');
+  const rect = btn.getBoundingClientRect();
+  panel.style.top = (rect.bottom + 8) + 'px';
+  panel.style.right = (window.innerWidth - rect.right) + 'px';
+  setTimeout(() => document.addEventListener('click', notifOutsideClickHandler), 0);
+
+  try {
+    const d = await api('/api/admin/audit-log?limit=10');
+    const NOTIF_LABELS = { login: 'Вход', authz_denied: 'Отказано в доступе', role_change: 'Изменение роли', totp_enabled: 'Включена 2FA', totp_disabled: 'Отключена 2FA', login_totp: 'Неверный код 2FA' };
+    panel.innerHTML = !d.events.length
+      ? '<div class="empty-box">Событий нет</div>'
+      : d.events.map((e) => `<div class="notif-item"><span class="notif-item-action">${esc(NOTIF_LABELS[e.action] || e.action)}</span><span class="notif-item-who">${esc(e.actingLogin || '—')}</span><span class="notif-item-time">${esc(new Date(e.ts).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }))}</span></div>`).join('');
+    if (d.events.length) localStorage.setItem(BELL_LAST_SEEN_KEY, d.events[0].ts);
+    refreshNotifBadge();
+  } catch (e) {
+    panel.innerHTML = '<div class="error-box">Ошибка загрузки</div>';
+  }
+}
+function notifOutsideClickHandler(e) {
+  const panel = document.getElementById('notifPanel');
+  const btn = document.getElementById('notifBellBtn');
+  if (panel && !panel.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+    panel.remove();
+    document.removeEventListener('click', notifOutsideClickHandler);
+  }
+}
+
 function bindLoginForm() {
   const form = document.getElementById('loginForm');
   if (!form) return;
@@ -233,18 +336,23 @@ function bindLoginForm() {
     btn.disabled = true;
     btn.textContent = 'Входим...';
     try {
-      await api('/api/auth/login', {
+      const loginResult = await api('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: server, login, password }),
       });
-      if (remember) {
-        localStorage.setItem(LS_KEY, JSON.stringify({ server, login }));
-      } else {
-        localStorage.removeItem(LS_KEY);
-      }
       document.getElementById('fPassword').value = '';
-      showApp();
+      if (loginResult.requiresTotp) {
+        await promptTotpLogin(loginResult.pendingId, remember, server, login);
+      } else {
+        currentUserRole = loginResult.role || 'viewer';
+        if (remember) {
+          localStorage.setItem(LS_KEY, JSON.stringify({ server, login }));
+        } else {
+          localStorage.removeItem(LS_KEY);
+        }
+        showApp();
+      }
     } catch (err) {
       errBox.textContent = err.message || 'Не удалось подключиться к серверу iiko';
       errBox.classList.add('visible');
@@ -252,6 +360,64 @@ function bindLoginForm() {
       btn.disabled = false;
       btn.textContent = 'Войти';
     }
+  });
+}
+
+/** Second step of a 2FA-protected login: prompts for the 6-digit TOTP code
+ *  via the shared modal (reused rather than duplicating login markup across
+ *  all 12 pages), then completes the login the same way the non-2FA path
+ *  does. Resolves once the modal is dismissed (success or cancel). */
+function promptTotpLogin(pendingId, remember, server, login) {
+  return new Promise((resolve) => {
+    openModal({
+      title: 'Код двухфакторной аутентификации',
+      bodyHtml: `
+        <div class="field">
+          <label for="totpCode">Код из приложения-аутентификатора</label>
+          <input id="totpCode" type="text" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code"/>
+        </div>
+        <div class="login-error" id="totpError"></div>
+      `,
+      footerHtml: `
+        <button type="button" class="btn-ghost" id="totpCancelBtn">Отмена</button>
+        <button type="button" class="btn-primary" id="totpSubmitBtn" style="width:auto;margin-top:0;">Подтвердить</button>
+      `,
+      onMount: (modalEl) => {
+        modalEl.querySelector('#totpCode').focus();
+        modalEl.querySelector('#totpCancelBtn').addEventListener('click', () => { closeModal(); resolve(); });
+        const submit = async () => {
+          const code = modalEl.querySelector('#totpCode').value.trim();
+          const errBox = modalEl.querySelector('#totpError');
+          errBox.classList.remove('visible');
+          if (!/^\d{6}$/.test(code)) {
+            errBox.textContent = 'Код должен состоять из 6 цифр';
+            errBox.classList.add('visible');
+            return;
+          }
+          try {
+            const result = await api('/api/auth/totp-login-verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pendingId, code }),
+            });
+            currentUserRole = result.role || 'viewer';
+            if (remember) {
+              localStorage.setItem(LS_KEY, JSON.stringify({ server, login }));
+            } else {
+              localStorage.removeItem(LS_KEY);
+            }
+            closeModal();
+            showApp();
+            resolve();
+          } catch (err) {
+            errBox.textContent = err.message || 'Неверный код';
+            errBox.classList.add('visible');
+          }
+        };
+        modalEl.querySelector('#totpSubmitBtn').addEventListener('click', submit);
+        modalEl.querySelector('#totpCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+      },
+    });
   });
 }
 
@@ -293,6 +459,97 @@ function startCommonPolling() {
   pollTimers.push(setInterval(loadStatus, 30000));
 }
 
+// ---------------- Toast notifications ----------------
+function toast(message, type, durationMs) {
+  type = type || 'info';
+  durationMs = durationMs || 4000;
+  let root = document.getElementById('toastRoot');
+  if (!root) {
+    root = document.createElement('div');
+    root.id = 'toastRoot';
+    root.className = 'toast-root';
+    document.body.appendChild(root);
+  }
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = message;
+  root.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  const remove = () => { el.classList.remove('show'); setTimeout(() => el.remove(), 200); };
+  const timer = setTimeout(remove, durationMs);
+  el.addEventListener('click', () => { clearTimeout(timer); remove(); });
+}
+
+// ---------------- Modal dialog ----------------
+// Callers must esc() any dynamic value embedded in title/bodyHtml/footerHtml
+// (e.g. an employee name) — same XSS discipline as the rest of the app.
+function escHandlerForModal(e) { if (e.key === 'Escape') closeModal(); }
+function openModal(opts) {
+  closeModal();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'activeModalBackdrop';
+  backdrop.innerHTML =
+    '<div class="modal" role="dialog" aria-modal="true">' +
+      '<div class="modal-header"><h3>' + opts.title + '</h3><button type="button" class="modal-close" aria-label="Закрыть">&times;</button></div>' +
+      '<div class="modal-body">' + opts.bodyHtml + '</div>' +
+      (opts.footerHtml ? '<div class="modal-footer">' + opts.footerHtml + '</div>' : '') +
+    '</div>';
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+  backdrop.querySelector('.modal-close').addEventListener('click', closeModal);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  document.addEventListener('keydown', escHandlerForModal);
+  if (opts.onMount) opts.onMount(backdrop);
+  return backdrop;
+}
+function closeModal() {
+  const el = document.getElementById('activeModalBackdrop');
+  if (!el) return;
+  el.classList.remove('open');
+  document.removeEventListener('keydown', escHandlerForModal);
+  setTimeout(() => el.remove(), 200);
+}
+
+// ---------------- Client-side pagination ----------------
+// items are already-loaded rows; pageSize rows are rendered at a time via
+// renderPageFn(pageItems, startIndex) into containerEl (a dedicated element
+// separate from the table body, holding just the Назад/Вперёд controls).
+function paginate(items, pageSize, containerEl, renderPageFn) {
+  let page = 1;
+  const totalPages = () => Math.max(1, Math.ceil(items.length / pageSize));
+  function render() {
+    page = Math.min(Math.max(1, page), totalPages());
+    const start = (page - 1) * pageSize;
+    renderPageFn(items.slice(start, start + pageSize), start);
+    containerEl.innerHTML =
+      '<div class="pagination">' +
+        '<button type="button" class="pagination-btn" data-act="prev"' + (page <= 1 ? ' disabled' : '') + '>Назад</button>' +
+        '<span class="pagination-info">Стр. ' + page + ' из ' + totalPages() + '</span>' +
+        '<button type="button" class="pagination-btn" data-act="next"' + (page >= totalPages() ? ' disabled' : '') + '>Вперёд</button>' +
+      '</div>';
+    const prevBtn = containerEl.querySelector('[data-act="prev"]');
+    const nextBtn = containerEl.querySelector('[data-act="next"]');
+    if (prevBtn) prevBtn.addEventListener('click', () => { page--; render(); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { page++; render(); });
+  }
+  render();
+  return { goTo: (p) => { page = p; render(); }, refresh: render };
+}
+
+// ---------------- Date-range helper ----------------
+// Reads two <input type="date"> values; returns {from, to} (plain
+// YYYY-MM-DD strings) or null if either is empty or the range is inverted.
+function readDateRange(fromId, toId) {
+  const fromEl = document.getElementById(fromId);
+  const toEl = document.getElementById(toId);
+  if (!fromEl || !toEl) return null;
+  const from = fromEl.value;
+  const to = toEl.value;
+  if (!from || !to || from > to) return null;
+  return { from, to };
+}
+
 function downloadCsv(path, filename) {
   const a = document.createElement('a');
   a.href = API + path;
@@ -309,7 +566,8 @@ async function bootShared() {
   bindLoginForm();
   bindLogout();
   try {
-    await api('/api/auth/me');
+    const me = await api('/api/auth/me');
+    currentUserRole = me.role || 'viewer';
     showApp();
     startCommonPolling();
   } catch {

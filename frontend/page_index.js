@@ -8,6 +8,8 @@ async function loadSummary() {
     document.getElementById('kpiOrders').textContent = fmt(d.orders);
     document.getElementById('kpiAvg').textContent = fmt(d.avgCheck);
     document.getElementById('kpiGuests').textContent = fmt(d.guests || 0);
+    const guestsSub = document.getElementById('kpiGuestsSub');
+    if (guestsSub) guestsSub.textContent = d.guestsSource === 'live' ? 'человек' : 'человек, оценка';
     if (d.comparedToYesterday) {
       const c = d.comparedToYesterday;
       setDelta('kpiRevenueDelta', c.revenueChangePct, 'к вчера');
@@ -31,6 +33,16 @@ async function loadForecast() {
     const d = await api('/api/forecast');
     document.getElementById('kpiForecast').textContent = fmt(d.forecastRevenue || 0);
     document.getElementById('kpiPlan').textContent = (d.planCompletion || 0);
+  } catch (e) { console.error(e); }
+}
+
+async function loadAverageCheck() {
+  try {
+    const d = await api('/api/average-check');
+    document.getElementById('kpiAvgWeek').textContent = fmt(d.week.avgCheck);
+    setDelta('kpiAvgWeekDelta', d.week.changePct, 'к пред. неделе');
+    document.getElementById('kpiAvgMonth').textContent = fmt(d.month.avgCheck);
+    setDelta('kpiAvgMonthDelta', d.month.changePct, 'к пред. месяцу');
   } catch (e) { console.error(e); }
 }
 
@@ -93,7 +105,7 @@ async function loadBranches() {
 }
 
 function startPage() {
-  loadSummary(); loadForecast(); loadChart(7); loadDishes(); loadBranches();
+  loadSummary(); loadForecast(); loadAverageCheck(); loadChart(7); loadDishes(); loadBranches();
   pollTimers.push(setInterval(loadSummary, 60000));
 }
 

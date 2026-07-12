@@ -22,6 +22,48 @@ function daysRange(n, offsetDays = 0) {
   return { from: fmt(from), to: fmt(to) };
 }
 
+// --- Calendar-aligned date ranges (distinct from the rolling daysRange()
+// above) — used by guest-count/average-check "this week"/"this month"
+// widgets, where offset=1 must give a PARTIAL-to-PARTIAL comparison (e.g.
+// "first 3 days of this week" vs "first 3 days of last week"), not a
+// misleading partial-vs-full-period comparison.
+function startOfWeek(d) {
+  const day = d.getDay();
+  const diff = (day === 0 ? -6 : 1) - day; // Monday-start week
+  const m = new Date(d);
+  m.setDate(d.getDate() + diff);
+  return m;
+}
+
+function weekToDateRange(offsetWeeks = 0) {
+  const now = new Date();
+  now.setDate(now.getDate() - offsetWeeks * 7);
+  const monday = startOfWeek(now);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return { from: fmt(monday), to: fmt(tomorrow) };
+}
+
+function daysInMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+}
+
+function monthToDateRange(offsetMonths = 0) {
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth() - offsetMonths, 1);
+  const cursorDay = offsetMonths === 0 ? now.getDate() : Math.min(now.getDate(), daysInMonth(target));
+  const to = new Date(target.getFullYear(), target.getMonth(), cursorDay + 1);
+  return { from: fmt(target), to: fmt(to) };
+}
+
+/** Exclusive "to" (day after the given date) — for turning a single
+ *  inclusive end-date into the half-open interval iiko's OLAP expects. */
+function exclusiveTo(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + 1);
+  return fmt(d);
+}
+
 /** Runs an async fn, swallowing errors into a uniform { ok:false, error } shape
  *  so a single unavailable OLAP field/report never breaks an entire page. */
 async function safe(fn) {
@@ -47,45 +89,58 @@ async function getStatus(client, meta) {
   };
 }
 
-/** Aggregates raw OLAP sales rows into { revenue, orders, byDepartment }. */
-function aggregateSales(client, olapRaw) {
+/** Aggregates raw OLAP sales rows into { revenue, orders, guests, byDepartment }.
+ *  `guestField`, if resolved by the caller via getSalesColumns()+pickField(),
+ *  is summed as real guest count; omit it to skip guest aggregation entirely. */
+function aggregateSales(client, olapRaw, guestField) {
   let revenue = 0,
-    orders = 0;
+    orders = 0,
+    guests = 0;
   const byDept = {};
   client.parseOlap(olapRaw).forEach((r) => {
     const s = parseFloat(r["DishSumInt"] || 0);
     const c = parseInt(r["DishAmountInt"] || 0, 10);
     revenue += s;
     orders += c;
+    if (guestField) guests += parseFloat(r[guestField] || 0);
     const name = r["Department"] || "Прочее";
     if (!byDept[name]) byDept[name] = { revenue: 0, orders: 0 };
     byDept[name].revenue += s;
     byDept[name].orders += c;
   });
-  return { revenue, orders, byDept };
+  return { revenue, orders, guests, byDept };
 }
+
+// Field-name patterns for the OLAP SALES guest-count field. Varies by
+// install like every other OLAP field name in this file — resolved
+// dynamically via getSalesColumns()+pickField(), never hardcoded.
+const GUEST_FIELD_PATTERNS = [/^GuestNum$/i, /^Guests?\.Num$/i, /^GuestCount$/i, /^DishGuestNum$/i, /^OrderGuestNum$/i];
 
 async function getSummary(client) {
   const { from, to, date } = todayRange();
   const yesterday = daysRange(1, 1);
 
+  const colsRes = await safe(() => getSalesColumns(client));
+  const guestField = colsRes.ok ? pickField(colsRes.value.names, GUEST_FIELD_PATTERNS) : null;
+
   const [olapRes, prevRes, deptsRes] = await Promise.allSettled([
-    client.getOlapSales(from, to),
-    client.getOlapSales(yesterday.from, yesterday.to),
+    client.getOlapSales(from, to, guestField ? [guestField] : []),
+    client.getOlapSales(yesterday.from, yesterday.to, guestField ? [guestField] : []),
     client.getDepartments(),
   ]);
 
   let revenue = 0,
     orders = 0,
+    guests = 0,
     byDept = {};
   if (olapRes.status === "fulfilled" && olapRes.value) {
-    ({ revenue, orders, byDept } = aggregateSales(client, olapRes.value));
+    ({ revenue, orders, guests, byDept } = aggregateSales(client, olapRes.value, guestField));
   }
 
   let prevRevenue = 0,
     prevOrders = 0;
   if (prevRes.status === "fulfilled" && prevRes.value) {
-    const agg = aggregateSales(client, prevRes.value);
+    const agg = aggregateSales(client, prevRes.value, guestField);
     prevRevenue = agg.revenue;
     prevOrders = agg.orders;
   }
@@ -107,7 +162,8 @@ async function getSummary(client) {
     revenue: +revenue.toFixed(2),
     orders,
     avgCheck,
-    guests: Math.round(orders * 1.21),
+    guests: guestField ? Math.round(guests) : Math.round(orders * 1.21),
+    guestsSource: guestField ? "live" : "estimated",
     departmentsCount: deptArr.length,
     byDepartment: Object.entries(byDept)
       .map(([name, v]) => ({
@@ -429,6 +485,8 @@ async function getEmployeeDirectory(client) {
   return {
     available: true,
     employees: items.map((e) => ({
+      id: e.id,
+      login: e.login || null,
       name: [e.lastName, e.firstName].filter(Boolean).join(" ") || e.name || e.login || "—",
       role: (e.mainRoleName || e.roleName || (Array.isArray(e.roles) ? e.roles.join(", ") : "")) || "—",
       status: e.deleted ? "уволен" : e.suspended ? "приостановлен" : "активен",
@@ -894,6 +952,229 @@ async function getRiskyOperations(client, days = 30) {
   };
 }
 
+// --- Employee credentials editor (login/password/PIN) ---
+//
+// Field names for password/PIN are NOT confirmed against a live iiko
+// install (see iikoClient.saveEmployee's doc comment) — login/PIN are
+// resolved dynamically via pickField() against the employee's own existing
+// keys, same pattern as getWarehouse()/getRiskyOperations(). If iiko
+// silently accepts the save but the new password doesn't work in practice,
+// the likely fix is sending sha1(password) instead of plaintext (getToken()
+// shows iiko's /resto/api/auth already requires a SHA1 password hash).
+const LOGIN_FIELD_PATTERNS = [/^login$/i];
+const PIN_FIELD_PATTERNS = [/^pinCode$/i, /^pin$/i, /^personalKeyboardPassword$/i];
+const PASSWORD_FIELD_DEFAULT = "password";
+
+// Security gate (added after review): this is the app's first MUTATING iiko
+// route, and requireAuth only proves "some valid iiko login is behind this
+// session" — it says nothing about whether that account should be allowed
+// to overwrite a DIFFERENT employee's credentials. iiko's own server-side
+// permission model for employees/save is unknown/unconfirmed from here, so
+// this app-level role check is a defense-in-depth gate, not a replacement
+// for iiko's own enforcement. Fails CLOSED: if the acting account's role
+// can't be matched against a known admin-like name, the edit is refused
+// rather than silently allowed — if your iiko install names its admin role
+// something not covered here, add it to ADMIN_ROLE_PATTERNS.
+const ADMIN_ROLE_PATTERNS = [
+  /admin/i, /администратор/i, /manager/i, /менеджер/i, /управля/i, /owner/i, /владелец/i, /директор/i,
+];
+
+async function assertActingUserIsAdmin(items, actingLogin) {
+  const me = items.find((e) => e.login === actingLogin);
+  const roleName = (me && (me.mainRoleName || me.roleName || (Array.isArray(me.roles) ? me.roles.join(", ") : ""))) || "";
+  const isAdmin = !!me && ADMIN_ROLE_PATTERNS.some((re) => re.test(roleName));
+  if (!isAdmin) {
+    throw new Error(
+      `Редактирование учётных данных сотрудников доступно только ролям с правами администратора. ` +
+      `Текущая роль в iiko: ${roleName || "не определена"}.`
+    );
+  }
+}
+
+async function updateEmployeeCredentials(client, employeeId, actingLogin, { login, password, pin } = {}) {
+  const raw = await client.getEmployees();
+  const items = Array.isArray(raw) ? raw : (raw && raw.items) || [];
+
+  await assertActingUserIsAdmin(items, actingLogin);
+
+  const existing = items.find((e) => String(e.id) === String(employeeId));
+  if (!existing) throw new Error("Сотрудник с указанным id не найден в iiko");
+
+  const keys = Object.keys(existing);
+  const loginField = pickField(keys, LOGIN_FIELD_PATTERNS) || "login";
+  const pinField = pickField(keys, PIN_FIELD_PATTERNS) || "pinCode";
+
+  const payload = { ...existing };
+  if (login) payload[loginField] = login;
+  if (password) payload[PASSWORD_FIELD_DEFAULT] = password;
+  if (pin) payload[pinField] = pin;
+
+  // NOTE: the iiko response (`saved`) is deliberately NOT included in this
+  // return value. iiko upsert endpoints commonly echo back the persisted
+  // entity, which would put the plaintext password/PIN just submitted into
+  // the HTTP response body (visible in DevTools/proxy logs/HAR exports) —
+  // caught in review. Callers only need to know the save succeeded.
+  await client.saveEmployee(payload, [password, pin].filter(Boolean));
+  return {
+    ok: true,
+    id: employeeId,
+    fieldsUsed: { loginField, pinField, passwordField: PASSWORD_FIELD_DEFAULT },
+  };
+}
+
+// --- Employee attendance log ---
+//
+// Endpoint/response shape is a GUESS (see iikoClient.getAttendance's doc
+// comment) — degrades to {available:false} on any mismatch rather than
+// crashing the page, same convention as every other optional metric here.
+const ATT_EMPLOYEE_ID_PATTERNS = [/^employeeId$/i, /^employee\.id$/i, /^personId$/i];
+const ATT_CLOCKIN_PATTERNS = [/^comeTime$/i, /^dateFrom$/i, /^clockIn$/i, /^startTime$/i];
+const ATT_CLOCKOUT_PATTERNS = [/^leaveTime$/i, /^dateTo$/i, /^clockOut$/i, /^endTime$/i];
+
+async function getAttendance(client, from, to, employeeIdFilter) {
+  const res = await safe(() => client.getAttendance(from, to));
+  if (!res.ok) return { available: false, error: res.error, records: [] };
+  const rows = Array.isArray(res.value) ? res.value : (res.value && res.value.items) || [];
+  if (!rows.length) return { available: true, records: [], source: "live" };
+
+  const keys = Object.keys(rows[0] || {});
+  const inField = pickField(keys, ATT_CLOCKIN_PATTERNS);
+  if (!inField) {
+    return { available: false, error: "Сервер iiko вернул данные о явках в неожиданном формате", records: [] };
+  }
+  const outField = pickField(keys, ATT_CLOCKOUT_PATTERNS);
+  const empIdField = pickField(keys, ATT_EMPLOYEE_ID_PATTERNS);
+
+  const dirRes = await safe(() => client.getEmployees());
+  const nameById = {};
+  if (dirRes.ok) {
+    const items = Array.isArray(dirRes.value) ? dirRes.value : (dirRes.value && dirRes.value.items) || [];
+    items.forEach((e) => {
+      nameById[e.id] = [e.lastName, e.firstName].filter(Boolean).join(" ") || e.name || e.login || "—";
+    });
+  }
+
+  let records = rows.map((r) => {
+    const empId = empIdField ? r[empIdField] : null;
+    const clockIn = inField ? r[inField] : null;
+    const clockOut = outField ? r[outField] : null;
+    const hours =
+      clockIn && clockOut ? +((new Date(clockOut) - new Date(clockIn)) / 3600000).toFixed(2) : null;
+    return {
+      employeeId: empId,
+      employeeName: nameById[empId] || "Не указано",
+      date: clockIn ? String(clockIn).slice(0, 10) : null,
+      clockIn,
+      clockOut,
+      hours,
+    };
+  });
+  if (employeeIdFilter) {
+    records = records.filter((r) => String(r.employeeId) === String(employeeIdFilter));
+  }
+  records.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  return { available: true, records, source: "live" };
+}
+
+// --- Guest count analytics ---
+//
+// Depends on the same dynamically-resolved GuestNum-family field as
+// getSummary(); degrades to {available:false} if this iiko install doesn't
+// expose it (medium confidence per the plan's API confidence table).
+async function getGuestAnalytics(client, customFrom, customTo) {
+  const colsRes = await safe(() => getSalesColumns(client));
+  const guestField = colsRes.ok ? pickField(colsRes.value.names, GUEST_FIELD_PATTERNS) : null;
+  if (!guestField) {
+    return {
+      available: false,
+      error: "Сервер iiko не предоставляет поле числа гостей в отчёте по продажам",
+    };
+  }
+
+  const today = todayRange();
+  const week = weekToDateRange(0);
+  const month = monthToDateRange(0);
+  const custom = customFrom && customTo ? { from: customFrom, to: exclusiveTo(customTo) } : null;
+
+  const ranges = [today, week, month, ...(custom ? [custom] : [])];
+  const results = await Promise.allSettled(ranges.map((r) => client.getOlapSales(r.from, r.to, [guestField])));
+
+  function sumGuests(res) {
+    if (res.status !== "fulfilled" || !res.value) return { guests: 0, days: new Set() };
+    let guests = 0;
+    const days = new Set();
+    client.parseOlap(res.value).forEach((r) => {
+      guests += parseFloat(r[guestField] || 0);
+      const d = (r["OpenDate.Typed"] || "").slice(0, 10);
+      if (d) days.add(d);
+    });
+    return { guests, days };
+  }
+
+  const todayAgg = sumGuests(results[0]);
+  const weekAgg = sumGuests(results[1]);
+  const monthAgg = sumGuests(results[2]);
+  const customAgg = custom ? sumGuests(results[3]) : null;
+
+  const trendRes = await safe(() => client.getOlapSales(month.from, month.to, [guestField]));
+  const byDate = {};
+  if (trendRes.ok) {
+    client.parseOlap(trendRes.value).forEach((r) => {
+      const d = (r["OpenDate.Typed"] || "").slice(0, 10);
+      if (!d) return;
+      byDate[d] = (byDate[d] || 0) + parseFloat(r[guestField] || 0);
+    });
+  }
+  const labels = Object.keys(byDate).sort();
+  const avg = (agg) => (agg.days.size > 0 ? +(agg.guests / agg.days.size).toFixed(1) : 0);
+
+  return {
+    available: true,
+    today: { total: Math.round(todayAgg.guests) },
+    week: { total: Math.round(weekAgg.guests), avgPerDay: avg(weekAgg) },
+    month: { total: Math.round(monthAgg.guests), avgPerDay: avg(monthAgg) },
+    custom: customAgg ? { total: Math.round(customAgg.guests), avgPerDay: avg(customAgg) } : null,
+    trend: { labels, guests: labels.map((d) => Math.round(byDate[d])) },
+    source: "live",
+  };
+}
+
+// --- Average check (avg ticket) analytics ---
+//
+// Needs no new iiko API surface — reuses getOlapSales()/aggregateSales()
+// already relied on elsewhere, just with calendar-aligned date ranges.
+async function getAverageCheckAnalytics(client) {
+  const today = todayRange();
+  const yesterday = daysRange(1, 1);
+  const week = weekToDateRange(0);
+  const prevWeek = weekToDateRange(1);
+  const month = monthToDateRange(0);
+  const prevMonth = monthToDateRange(1);
+
+  const ranges = [today, yesterday, week, prevWeek, month, prevMonth];
+  const results = await Promise.allSettled(ranges.map((r) => client.getOlapSales(r.from, r.to)));
+
+  function avgCheckFor(res) {
+    if (res.status !== "fulfilled" || !res.value) return 0;
+    const { revenue, orders } = aggregateSales(client, res.value);
+    return orders > 0 ? +(revenue / orders).toFixed(2) : 0;
+  }
+
+  const todayAvg = avgCheckFor(results[0]);
+  const yesterdayAvg = avgCheckFor(results[1]);
+  const weekAvg = avgCheckFor(results[2]);
+  const prevWeekAvg = avgCheckFor(results[3]);
+  const monthAvg = avgCheckFor(results[4]);
+  const prevMonthAvg = avgCheckFor(results[5]);
+
+  return {
+    today: { avgCheck: todayAvg, changePct: pctChange(todayAvg, yesterdayAvg) },
+    week: { avgCheck: weekAvg, changePct: pctChange(weekAvg, prevWeekAvg) },
+    month: { avgCheck: monthAvg, changePct: pctChange(monthAvg, prevMonthAvg) },
+    source: "live",
+  };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -911,4 +1192,8 @@ module.exports = {
   getForecast,
   getWarehouse,
   getRiskyOperations,
+  updateEmployeeCredentials,
+  getAttendance,
+  getGuestAnalytics,
+  getAverageCheckAnalytics,
 };

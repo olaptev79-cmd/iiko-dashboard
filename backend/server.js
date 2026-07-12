@@ -1,4 +1,5 @@
 require("dotenv").config();
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -7,6 +8,11 @@ const cookieParser = require("cookie-parser");
 const IikoClient = require("./iikoClient");
 const sessionStore = require("./sessionStore");
 const svc = require("./dashboardService");
+const { store: userStore, roleAtLeast } = require("./userStore");
+const auditLog = require("./auditLog");
+const notifier = require("./notifier");
+const totp = require("./totp");
+const scheduler = require("./scheduler");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -115,6 +121,22 @@ function requireAuth(req, res, next) {
   next();
 }
 
+/** Requires an authenticated session AND a minimum dashboard role (see
+ *  userStore.js — this is a DASHBOARD-UI permission, separate from
+ *  whatever role the login has inside iiko itself). Must run after
+ *  requireAuth (needs req.sessionMeta.login). Denials are logged so the
+ *  audit trail / suspicious-activity view can see attempted overreach. */
+function requireRole(minRole) {
+  return (req, res, next) => {
+    const role = userStore.getRole(req.sessionMeta.login);
+    if (!roleAtLeast(role, minRole)) {
+      auditLog.record({ actingLogin: req.sessionMeta.login, action: "authz_denied", target: req.path, result: "denied", ip: req.ip });
+      return res.status(403).json({ error: "Недостаточно прав для этого действия" });
+    }
+    next();
+  };
+}
+
 // ---- Simple in-memory rate limiting for login attempts ----
 const loginAttempts = new Map(); // ip -> { count, resetAt }
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
@@ -135,6 +157,58 @@ function loginRateLimit(req, res, next) {
   next();
 }
 
+// Recipient for suspicious-activity alerts (#34) and the scheduled daily
+// summary (#35/#36) — operator/env-configured, same principle as
+// notifier.js itself: never a user-suppliable destination.
+const ALERT_TELEGRAM_CHAT_ID = process.env.ALERT_TELEGRAM_CHAT_ID || "";
+const FAILED_LOGIN_ALERT_THRESHOLD = 5;
+const FAILED_LOGIN_ALERT_WINDOW_MS = 15 * 60 * 1000;
+
+/** Fires a Telegram alert once enough recent failures pile up for a login.
+ *  Never awaited by callers (best-effort, must never slow down or break the
+ *  login response) and never throws. */
+function maybeAlertOnFailedLogin(login, ip) {
+  if (!ALERT_TELEGRAM_CHAT_ID || !notifier.telegramConfigured()) return;
+  auditLog
+    .countRecentFailures(login, "login", FAILED_LOGIN_ALERT_WINDOW_MS)
+    .then((count) => {
+      if (count === FAILED_LOGIN_ALERT_THRESHOLD) {
+        // Fires exactly once per burst (only on the threshold-th failure,
+        // not every failure after) rather than spamming on every subsequent attempt.
+        return notifier.sendTelegram(
+          ALERT_TELEGRAM_CHAT_ID,
+          `⚠ Подозрительная активность: ${FAILED_LOGIN_ALERT_THRESHOLD} неудачных попыток входа подряд для «${login}» (IP: ${ip}) за последние 15 минут.`
+        );
+      }
+    })
+    .catch((e) => console.error("[auth] Не удалось отправить алерт о неудачных входах:", e.message));
+}
+
+// ---- Pending two-factor logins ----
+// A login whose iiko password check already succeeded but who has TOTP
+// enabled (userStore.getTotpSecret) doesn't get a real session cookie yet —
+// it waits here, keyed by a random id, holding the ALREADY-VERIFIED
+// IikoClient (see sessionStore.createFromClient's doc comment for why that's
+// safer than re-storing the raw password). Single-use and short-lived.
+const PENDING_TOTP_TTL_MS = 5 * 60 * 1000;
+const pendingTotpLogins = new Map(); // pendingId -> { client, login, expiresAt }
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, p] of pendingTotpLogins.entries()) {
+    if (now > p.expiresAt) pendingTotpLogins.delete(id);
+  }
+}, 60 * 1000).unref();
+
+function completeLogin(res, req, client, login) {
+  const sid = sessionStore.createFromClient(client, login);
+  setSessionCookie(res, sid);
+  const userRecord = userStore.ensureUser(login);
+  auditLog.record({ actingLogin: login, action: "login", result: "ok", ip: req.ip });
+  if (ALERT_TELEGRAM_CHAT_ID) scheduler.registerSession(login, client, ALERT_TELEGRAM_CHAT_ID);
+  console.log(`[auth] Успешный вход: ${login}@${client.baseUrl}`);
+  res.json({ ok: true, url: client.baseUrl, login, role: userRecord.role });
+}
+
 // ---------------- Auth routes ----------------
 
 app.post("/api/auth/login", loginRateLimit, async (req, res) => {
@@ -146,18 +220,45 @@ app.post("/api/auth/login", loginRateLimit, async (req, res) => {
   try {
     const client = new IikoClient(url, login, password);
     await client.verify();
-    const sid = sessionStore.create(url, login, password);
-    setSessionCookie(res, sid);
-    console.log(`[auth] Успешный вход: ${login}@${client.baseUrl}`);
-    res.json({ ok: true, url: client.baseUrl, login });
+    const totpSecret = userStore.getTotpSecret(login);
+    if (totpSecret) {
+      const pendingId = crypto.randomBytes(24).toString("hex");
+      pendingTotpLogins.set(pendingId, { client, login, expiresAt: Date.now() + PENDING_TOTP_TTL_MS });
+      return res.json({ ok: true, requiresTotp: true, pendingId });
+    }
+    completeLogin(res, req, client, login);
   } catch (e) {
+    auditLog.record({ actingLogin: login, action: "login", result: "denied", ip: req.ip });
+    maybeAlertOnFailedLogin(login, req.ip);
     console.log(`[auth] Неудачная попытка входа: ${login}@${String(url).slice(0, 60)}`);
     res.status(401).json({ error: sanitizeError(e.message) || "Не удалось авторизоваться на сервере iiko" });
   }
 });
 
+const TOTP_CODE_RE = /^\d{6}$/;
+app.post("/api/auth/totp-login-verify", loginRateLimit, (req, res) => {
+  const { pendingId, code } = req.body || {};
+  const pending = pendingId ? pendingTotpLogins.get(pendingId) : null;
+  if (!pending || Date.now() > pending.expiresAt) {
+    return res.status(401).json({ error: "Сессия входа истекла, попробуйте войти заново" });
+  }
+  if (!TOTP_CODE_RE.test(String(code || ""))) {
+    return res.status(400).json({ error: "Код должен состоять из 6 цифр" });
+  }
+  const secret = userStore.getTotpSecret(pending.login);
+  if (!secret || !totp.verify(code, secret)) {
+    auditLog.record({ actingLogin: pending.login, action: "login_totp", result: "denied", ip: req.ip });
+    maybeAlertOnFailedLogin(pending.login, req.ip);
+    return res.status(401).json({ error: "Неверный код" });
+  }
+  pendingTotpLogins.delete(pendingId); // single-use
+  completeLogin(res, req, pending.client, pending.login);
+});
+
 app.post("/api/auth/logout", (req, res) => {
   const sid = req.cookies[COOKIE_NAME];
+  const session = sessionStore.get(sid);
+  if (session) scheduler.unregisterSession(session.meta.login);
   if (sid) sessionStore.destroy(sid);
   res.clearCookie(COOKIE_NAME);
   res.json({ ok: true });
@@ -167,7 +268,43 @@ app.get("/api/auth/me", (req, res) => {
   const sid = req.cookies[COOKIE_NAME];
   const session = sessionStore.get(sid);
   if (!session) return res.status(401).json({ authenticated: false });
-  res.json({ authenticated: true, ...session.meta });
+  const role = userStore.getRole(session.meta.login) || "viewer";
+  res.json({ authenticated: true, ...session.meta, role });
+});
+
+// ---------------- 2FA enrollment (self-service, any authenticated user) ----------------
+
+app.post("/api/auth/totp-setup", requireAuth, async (req, res) => {
+  try {
+    const secret = totp.generateSecret();
+    const uri = totp.keyUri(req.sessionMeta.login, secret);
+    const qrDataUrl = await totp.qrDataUrl(uri);
+    // Secret is NOT saved yet — only after /totp-confirm proves the user
+    // actually scanned it correctly, so nobody can lock themselves out with
+    // a botched enrollment.
+    res.json({ secret, uri, qrDataUrl });
+  } catch (e) {
+    res.status(500).json({ error: sanitizeError(e.message) });
+  }
+});
+
+app.post("/api/auth/totp-confirm", requireAuth, (req, res) => {
+  const { secret, code } = req.body || {};
+  if (!secret || !TOTP_CODE_RE.test(String(code || ""))) {
+    return res.status(400).json({ error: "Укажите секрет и 6-значный код" });
+  }
+  if (!totp.verify(code, secret)) {
+    return res.status(400).json({ error: "Неверный код — проверьте время на телефоне и попробуйте ещё раз" });
+  }
+  userStore.setTotpSecret(req.sessionMeta.login, secret);
+  auditLog.record({ actingLogin: req.sessionMeta.login, action: "totp_enabled", result: "ok", ip: req.ip });
+  res.json({ ok: true });
+});
+
+app.post("/api/auth/totp-disable", requireAuth, (req, res) => {
+  userStore.setTotpSecret(req.sessionMeta.login, null);
+  auditLog.record({ actingLogin: req.sessionMeta.login, action: "totp_disabled", result: "ok", ip: req.ip });
+  res.json({ ok: true });
 });
 
 // ---------------- Dashboard routes (require session) ----------------
@@ -197,6 +334,132 @@ app.get("/api/employees/directory", requireAuth, wrap((r) => svc.getEmployeeDire
 app.get("/api/forecast", requireAuth, wrap((r) => svc.getForecast(r.client)));
 app.get("/api/warehouse", requireAuth, wrap((r) => svc.getWarehouse(r.client, clampDays(r.query.days, 30))));
 app.get("/api/risky-operations", requireAuth, wrap((r) => svc.getRiskyOperations(r.client, clampDays(r.query.days, 30))));
+
+// ---------------- New feature routes ----------------
+
+const LOGIN_RE = /^[\w.@-]{1,64}$/;
+const PIN_RE = /^\d{4}$/;
+const PASSWORD_MIN_LEN = 6;
+const PASSWORD_MAX_LEN = 100;
+
+function validateCredentialsBody(body) {
+  const { login, password, passwordConfirm, pin } = body || {};
+  const loginTrim = login ? String(login).trim() : "";
+  if (loginTrim && !LOGIN_RE.test(loginTrim)) {
+    return "Логин может содержать только латинские буквы, цифры и символы . _ - @";
+  }
+  const hasPw = !!password;
+  const hasConfirm = !!passwordConfirm;
+  if (hasPw || hasConfirm) {
+    if (!hasPw || !hasConfirm) return "Заполните оба поля пароля";
+    if (password.length < PASSWORD_MIN_LEN) return `Пароль должен содержать не менее ${PASSWORD_MIN_LEN} символов`;
+    if (password.length > PASSWORD_MAX_LEN) return "Пароль слишком длинный";
+    if (password !== passwordConfirm) return "Пароли не совпадают";
+  }
+  if (pin && !PIN_RE.test(String(pin))) return "PIN-код должен состоять ровно из 4 цифр";
+  if (!loginTrim && !hasPw && !pin) return "Укажите логин, пароль или PIN-код для сохранения";
+  return null;
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function validateDateRangeParams(from, to, maxDays = 366) {
+  if (!from || !to || !ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+    return "Укажите даты в формате ГГГГ-ММ-ДД";
+  }
+  if (from > to) return "Дата начала должна быть раньше даты окончания";
+  if ((new Date(to) - new Date(from)) / 86400000 > maxDays) return `Диапазон не может превышать ${maxDays} дней`;
+  return null;
+}
+
+// Feature: Employee Credentials Editor
+app.put(
+  "/api/employees/:id/credentials",
+  requireAuth,
+  (req, res, next) => {
+    const err = validateCredentialsBody(req.body);
+    if (err) return res.status(400).json({ error: err });
+    next();
+  },
+  wrap((r) =>
+    svc.updateEmployeeCredentials(r.client, r.params.id, r.sessionMeta.login, {
+      login: (r.body.login || "").trim() || undefined,
+      password: r.body.password || undefined,
+      pin: r.body.pin || undefined,
+    })
+  )
+);
+
+// Feature: Employee Attendance Log
+app.get(
+  "/api/employees/attendance",
+  requireAuth,
+  (req, res, next) => {
+    const err = validateDateRangeParams(req.query.from, req.query.to);
+    if (err) return res.status(400).json({ error: err });
+    if (req.query.employeeId && !/^[\w-]{1,64}$/.test(req.query.employeeId)) {
+      return res.status(400).json({ error: "Некорректный идентификатор сотрудника" });
+    }
+    next();
+  },
+  wrap((r) => svc.getAttendance(r.client, r.query.from, r.query.to, r.query.employeeId || null))
+);
+
+// Feature: Guest Count Analytics
+app.get(
+  "/api/guests",
+  requireAuth,
+  (req, res, next) => {
+    const { customFrom, customTo } = req.query;
+    if (!!customFrom !== !!customTo) return res.status(400).json({ error: "Укажите обе даты своего периода" });
+    if (customFrom) {
+      const err = validateDateRangeParams(customFrom, customTo);
+      if (err) return res.status(400).json({ error: err });
+    }
+    next();
+  },
+  wrap((r) => svc.getGuestAnalytics(r.client, r.query.customFrom || null, r.query.customTo || null))
+);
+
+// Feature: Average Check Analytics
+app.get("/api/average-check", requireAuth, wrap((r) => svc.getAverageCheckAnalytics(r.client)));
+
+// ---------------- Dashboard admin: users/roles + audit log ----------------
+// Dashboard-UI permissions only (see userStore.js) — separate from iiko's
+// own role model. Every dashboard login gets a viewer/editor/admin role
+// here; the very first login ever recorded becomes admin automatically.
+
+app.get(
+  "/api/admin/users",
+  requireAuth,
+  requireRole("admin"),
+  wrap(async () => ({ users: userStore.listUsers() }))
+);
+
+const ROLE_BODY_RE = /^(viewer|editor|admin)$/;
+app.put(
+  "/api/admin/users/:login/role",
+  requireAuth,
+  requireRole("admin"),
+  (req, res, next) => {
+    if (!ROLE_BODY_RE.test(String(req.body && req.body.role))) {
+      return res.status(400).json({ error: "Роль должна быть одной из: viewer, editor, admin" });
+    }
+    next();
+  },
+  wrap((r) => {
+    userStore.setRole(r.params.login, r.body.role);
+    auditLog.record({ actingLogin: r.sessionMeta.login, action: "role_change", target: `${r.params.login} -> ${r.body.role}`, result: "ok", ip: r.ip });
+    return { ok: true };
+  })
+);
+
+app.get(
+  "/api/admin/audit-log",
+  requireAuth,
+  requireRole("admin"),
+  wrap(async (r) => ({ events: await auditLog.readRecent(Math.min(parseInt(r.query.limit, 10) || 200, 1000)) }))
+);
 
 // CSV export for the top-dishes report (Excel-friendly, UTF-8 BOM + ;-separated).
 app.get(
@@ -231,6 +494,7 @@ app.get("/api/ping", (_req, res) => res.json({ ok: true, timestamp: new Date().t
 // Ensures in-flight requests finish and logs are flushed before the
 // container is actually killed on redeploy/restart (SIGTERM from Docker).
 const server = app.listen(PORT, () => console.log(`Aqba Dashboard backend запущен на порту ${PORT}`));
+scheduler.start();
 
 function shutdown(signal) {
   console.log(`[server] Получен ${signal}, завершаем работу...`);

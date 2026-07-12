@@ -39,6 +39,21 @@ class SessionStore {
     return id;
   }
 
+  /** Completes a login using an ALREADY-VERIFIED IikoClient instance — used
+   *  by the 2FA flow (server.js), where client.verify() already succeeded
+   *  against iiko before the pending-TOTP step, so there's no need to
+   *  re-construct (and no need to have kept the raw password around for)
+   *  a second IikoClient. */
+  createFromClient(client, login) {
+    const id = crypto.randomBytes(32).toString("hex");
+    this.sessions.set(id, {
+      client,
+      meta: { url: client.baseUrl, login },
+      lastAccess: Date.now(),
+    });
+    return id;
+  }
+
   get(id) {
     if (!id) return null;
     const s = this.sessions.get(id);

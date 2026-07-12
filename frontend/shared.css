@@ -264,7 +264,8 @@ nav.tabs{display:none;}
    on mobile — the table itself keeps a sane min-width for readability. */
 #dishesTable,#branchesTable,#departmentsTable,#menuTable,#paymentsTable,
 #orderTypesContainer,#accountsTable,#itemsTable,#perfContainer,
-#directoryContainer,#employeeTable,#typesBreakdown,#eventsTimeline{
+#directoryContainer,#employeeTable,#typesBreakdown,#eventsTimeline,
+#attendanceContainer{
   width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;
 }
 table{width:100%;border-collapse:collapse;font-size:13px;min-width:480px;}
@@ -305,6 +306,60 @@ tbody tr:last-child td{border-bottom:none;}
 .delta.flat{color:var(--muted);}
 
 canvas{max-width:100%;max-height:280px;}
+
+/* ---------- Toast notifications ---------- */
+.toast-root{position:fixed;bottom:24px;right:24px;z-index:60;display:flex;flex-direction:column;gap:10px;max-width:360px;}
+.toast{background:var(--surface-raised);border:1px solid var(--border-strong);border-left:3px solid var(--accent);border-radius:var(--radius-sm);padding:12px 16px;font-size:13.5px;color:var(--text);box-shadow:var(--shadow-md);cursor:pointer;opacity:0;transform:translateY(8px);transition:opacity .2s var(--ease),transform .2s var(--ease);}
+.toast.show{opacity:1;transform:translateY(0);}
+.toast-success{border-left-color:var(--success);}
+.toast-error{border-left-color:var(--risk);}
+.toast-info{border-left-color:var(--accent);}
+@media (max-width:767px){
+  .toast-root{left:14px;right:14px;bottom:calc(var(--bottomnav-h) + 12px);max-width:none;}
+}
+
+/* ---------- Modal dialog ---------- */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;transition:opacity .2s ease;}
+.modal-backdrop.open{opacity:1;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);width:100%;max-width:440px;max-height:88vh;overflow-y:auto;transform:scale(0.96);transition:transform .2s var(--ease);}
+.modal-backdrop.open .modal{transform:scale(1);}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid var(--border);}
+.modal-header h3{font-family:var(--font-display);font-size:16.5px;font-weight:600;}
+.modal-close{background:transparent;border:none;color:var(--muted);font-size:22px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:var(--radius-sm);}
+.modal-close:hover{color:var(--text);background:var(--row-hover);}
+.modal-body{padding:22px;}
+.modal-footer{display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid var(--border);}
+
+/* ---------- Pagination ---------- */
+.pagination{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:16px;}
+.pagination-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:7px 16px;border-radius:20px;cursor:pointer;font-size:12.5px;font-weight:600;font-family:var(--font-mono);transition:all .18s var(--ease);}
+.pagination-btn:hover:not(:disabled){color:var(--text);border-color:var(--border-strong);}
+.pagination-btn:disabled{opacity:.4;cursor:not-allowed;}
+.pagination-info{font-size:12.5px;color:var(--muted);font-family:var(--font-mono);}
+
+/* ---------- Date range row + select styling ---------- */
+.date-range-row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:18px;}
+.date-range-row .field{margin-bottom:0;min-width:160px;}
+.field select{width:100%;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 15px;color:var(--text);font-size:14.5px;font-family:var(--font-body);transition:border-color .2s var(--ease),box-shadow .2s var(--ease),background .2s var(--ease);}
+.field select:focus{outline:none;border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px var(--accent-soft);}
+
+/* ---------- Row action buttons (e.g. "Редактировать" in a table) ---------- */
+.btn-row-action{background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:var(--radius-sm);font-size:12px;cursor:pointer;font-family:var(--font-body);font-weight:500;transition:all .18s var(--ease);white-space:nowrap;}
+.btn-row-action:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);}
+
+/* ---------- Inline select inside a table cell (e.g. role picker) ---------- */
+.role-select{background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--text);font-size:12.5px;font-family:var(--font-body);cursor:pointer;}
+.role-select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft);}
+
+/* ---------- Notification bell (Wave 2, #45) ---------- */
+.notif-bell{position:relative;}
+.notif-badge{position:absolute;top:-4px;right:-4px;background:var(--risk);color:#fff;font-family:var(--font-mono);font-size:10px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1;}
+.notif-panel{position:fixed;z-index:55;width:320px;max-width:calc(100vw - 24px);max-height:400px;overflow-y:auto;background:var(--surface-raised);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);animation:fadeIn .15s ease;}
+.notif-item{display:flex;flex-direction:column;gap:3px;padding:11px 14px;border-bottom:1px solid var(--border);font-size:12.5px;}
+.notif-item:last-child{border-bottom:none;}
+.notif-item-action{font-weight:600;color:var(--text);}
+.notif-item-who{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;}
+.notif-item-time{color:var(--faint);font-family:var(--font-mono);font-size:11px;}
 
 /* =========================================================================
    Responsive breakpoints

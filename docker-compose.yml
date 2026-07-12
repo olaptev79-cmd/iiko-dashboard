@@ -6,6 +6,13 @@ services:
       - "3001:3001"
     env_file: .env
     restart: unless-stopped
+    volumes:
+      # Dashboard-own user roles/audit log/tokens (backend/userStore.js,
+      # auditLog.js, tokenStore.js) — the first data this app persists to
+      # disk. Explicitly NOT iiko credentials (those stay in-memory only,
+      # see sessionStore.js) — losing this volume just resets dashboard
+      # roles/audit history/API tokens, never iiko access.
+      - backend_data:/app/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/ping"]
       interval: 30s
@@ -27,7 +34,14 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80"]
+      # 127.0.0.1, not localhost: this Alpine image's /etc/hosts resolves
+      # "localhost" to ::1 first, but nginx's default `listen 80;` is
+      # IPv4-only — wget would try ::1, get connection refused, and never
+      # fall back to IPv4, making the healthcheck report unhealthy even
+      # though nginx is actually up and serving real traffic fine (found
+      # during Docker verification of this app; pre-existing, unrelated to
+      # any feature work, fixed here as a one-line drive-by).
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -37,4 +51,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  backend_data:
 

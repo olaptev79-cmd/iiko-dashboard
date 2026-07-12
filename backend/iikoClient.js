@@ -290,6 +290,86 @@ class IikoClient {
     return this.apiGet("employees");
   }
 
+  /** Redacts a sensitive value out of an error/log string before it's ever
+   *  thrown/logged/returned to the client — guards against iiko's own error
+   *  responses accidentally echoing back a submitted password/PIN (e.g. a
+   *  validation message like "invalid password: ..."). */
+  redactSensitive(text, ...secrets) {
+    let out = String(text == null ? "" : text);
+    secrets.forEach((s) => {
+      if (s && String(s).length >= 3) {
+        out = out.split(String(s)).join("[скрыто]");
+      }
+    });
+    return out;
+  }
+
+  /** Upserts an employee record in iiko. The exact endpoint/payload shape
+   *  for editing an employee's login/password/PIN is NOT confirmed against
+   *  a live iiko server in this codebase — this tries the conventional
+   *  iikoServer RMS path first, then a plausible fallback, mirroring the
+   *  same multi-variant approach getToken() already uses for /resto/api/auth.
+   *  `secrets` (password/PIN values) are redacted from any error text before
+   *  it is ever thrown, logged, or returned to the client. */
+  async saveEmployee(payload, secrets = []) {
+    const key = await this.getToken();
+    const attempts = [
+      { method: "post", url: `${this.baseUrl}/resto/api/employees/save` },
+      { method: "post", url: `${this.baseUrl}/resto/api/employees` },
+    ];
+    const errors = [];
+    for (const a of attempts) {
+      try {
+        const res = await this.http.request({
+          method: a.method,
+          url: a.url,
+          params: { key },
+          headers: { "Content-Type": "application/json" },
+          data: payload,
+          timeout: 20000,
+        });
+        if (res.status >= 200 && res.status < 300) return res.data;
+        errors.push(`${a.method.toUpperCase()} ${a.url} -> ${res.status}: ${this.describeError(res.data)}`);
+      } catch (e) {
+        errors.push(`${a.method.toUpperCase()} ${a.url} -> ${e.message}`);
+      }
+    }
+    const message = this.redactSensitive(
+      `Не удалось сохранить сотрудника в iiko. Попробованные варианты: ${errors.join(" | ")}`,
+      ...secrets
+    );
+    throw new Error(message);
+  }
+
+  /** Fetches employee attendance (clock-in/clock-out) records. The exact
+   *  endpoint/response shape is NOT confirmed against a live iiko server —
+   *  tries a couple of plausible candidates and surfaces whatever error iiko
+   *  actually returns so a mismatch is diagnosable rather than silent. If
+   *  the real endpoint returns XML instead of JSON, this will need an XML
+   *  parsing fallback that can't be written without seeing a live response. */
+  async getAttendance(from, to) {
+    const key = await this.getToken();
+    const attempts = [
+      { url: `${this.baseUrl}/resto/api/employees/attendance`, params: { key, from, to } },
+      { url: `${this.baseUrl}/resto/api/employees/attendance.xml`, params: { key, from, to } },
+    ];
+    const errors = [];
+    for (const a of attempts) {
+      try {
+        const res = await this.http.get(a.url, {
+          params: a.params,
+          headers: { Accept: "application/json" },
+          timeout: 20000,
+        });
+        if (res.status >= 200 && res.status < 300) return res.data;
+        errors.push(`${a.url} -> ${res.status}: ${this.describeError(res.data)}`);
+      } catch (e) {
+        errors.push(`${a.url} -> ${e.message}`);
+      }
+    }
+    throw new Error(`Не удалось получить явки из iiko. Попробованные варианты: ${errors.join(" | ")}`);
+  }
+
   // iiko v2 OLAP report filters of type DATE reject any time component —
   // the server responds with HTTP 409 ("в периоде типа DATE указано время")
   // if from/to include a time-of-day. Always send plain "yyyy-MM-dd".
@@ -313,12 +393,12 @@ class IikoClient {
     };
   }
 
-  async getOlapSales(from, to) {
+  async getOlapSales(from, to, extraAggregateFields = []) {
     return this.olapPost({
       reportType: "SALES",
       buildSummary: true,
       groupByRowFields: ["OpenDate.Typed", "Department.Id", "Department"],
-      aggregateFields: ["DishAmountInt", "DishSumInt"],
+      aggregateFields: ["DishAmountInt", "DishSumInt", ...extraAggregateFields],
       filters: {
         "OpenDate.Typed": this.dateRangeFilter(from, to),
       },
