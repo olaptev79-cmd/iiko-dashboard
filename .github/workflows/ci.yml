@@ -61,9 +61,21 @@ jobs:
         working-directory: ./backend
         run: node --check scheduler.js
 
+      - name: Check JS syntax (snapshotStore.js)
+        working-directory: ./backend
+        run: node --check snapshotStore.js
+
+      - name: Check JS syntax (assistant.js)
+        working-directory: ./backend
+        run: node --check assistant.js
+
       - name: Attendance parser regression test (mock iiko responses)
         working-directory: ./backend
         run: node test_attendance.js
+
+      - name: Assistant whitelist-router test
+        working-directory: ./backend
+        run: node test_assistant.js
 
       - name: Create stub .env for docker-compose validation
         run: cp .env.example .env

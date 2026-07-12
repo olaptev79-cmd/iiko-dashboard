@@ -414,6 +414,25 @@ canvas{max-width:100%;max-height:280px;}
 .embed-value{font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--text);margin-top:4px;}
 .embed-foot{margin-top:8px;color:var(--faint);font-size:10px;font-family:var(--font-mono);text-align:right;}
 
+/* ---------- Assistant chat (Wave 7, #50) ---------- */
+.chat-log{display:flex;flex-direction:column;gap:12px;max-height:440px;overflow-y:auto;margin-bottom:16px;}
+.chat-msg{max-width:82%;padding:11px 14px;border-radius:var(--radius-md);font-size:14px;line-height:1.5;}
+.chat-user{align-self:flex-end;background:var(--accent-soft);color:var(--text);border:1px solid var(--border);}
+.chat-bot{align-self:flex-start;background:var(--surface-alt);border:1px solid var(--border);width:100%;max-width:100%;}
+.chat-answer{font-weight:500;margin-bottom:8px;}
+.chat-thinking{color:var(--muted);font-style:italic;}
+.chat-bot table{margin-top:6px;}
+.chat-kpis{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;}
+.chat-kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;min-width:96px;}
+.chat-kpi-label{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);}
+.chat-kpi-val{font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--text);margin-top:3px;}
+.chat-suggestions{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+.chip{background:transparent;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:20px;font-size:12.5px;cursor:pointer;font-family:var(--font-body);transition:all .15s var(--ease);}
+.chip:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);}
+.chat-input-row{display:flex;gap:10px;align-items:center;}
+.chat-input-row input{flex:1;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 15px;color:var(--text);font-size:14.5px;font-family:var(--font-body);}
+.chat-input-row input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+
 /* ---------- Register heatmap (Wave 4, #5) ---------- */
 .heatmap-scroll{overflow-x:auto;}
 .heatmap{border-collapse:collapse;}

@@ -15,6 +15,7 @@ const totp = require("./totp");
 const scheduler = require("./scheduler");
 const { store: tokenStore } = require("./tokenStore");
 const snapshotStore = require("./snapshotStore");
+const assistant = require("./assistant");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -608,6 +609,22 @@ app.delete("/api/admin/tokens/:id", requireAuth, requireRole("admin"), (req, res
   auditLog.record({ actingLogin: req.sessionMeta.login, action: "token_revoke", target: String(req.params.id), result: ok ? "ok" : "denied", ip: req.ip });
   res.json({ ok });
 });
+
+// ---------------- Wave 7: NL query assistant (whitelist router) ----------------
+// The LLM only routes to a whitelisted read-only report (see assistant.js).
+app.get("/api/assistant/status", requireAuth, (_req, res) => res.json({ configured: assistant.configured() }));
+app.post(
+  "/api/assistant",
+  requireAuth,
+  (req, res, next) => {
+    const q = req.body && req.body.question;
+    if (!q || typeof q !== "string" || !q.trim() || q.length > 500) {
+      return res.status(400).json({ error: "Вопрос должен быть текстом до 500 символов" });
+    }
+    next();
+  },
+  wrap((r) => assistant.route(r.body.question, r.client))
+);
 
 // ---------------- Misc ----------------
 

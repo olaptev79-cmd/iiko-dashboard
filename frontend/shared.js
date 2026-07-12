@@ -40,6 +40,8 @@ const PAGES = [
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5 12 4l9 5.5"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>' },
   { href: 'risky.html', label: 'Опасные операции', short: 'Риски',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 1 21h22z"/><path d="M12 9v5"/><circle cx="12" cy="17.2" r="0.4" fill="currentColor"/></svg>' },
+  { href: 'assistant.html', label: 'Ассистент', short: 'Ассистент',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg>' },
   { href: 'extra.html', label: 'Доп. модули', short: 'Доп.',
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>' },
   { href: 'settings.html', label: 'Настройки', short: 'Настройки', minRole: 'admin',
@@ -700,6 +702,7 @@ const I18N_EN = {
   'Оплаты и скидки': 'Payments & discounts', 'Гости': 'Guests', 'Сотрудники': 'Employees',
   'Явки сотрудников': 'Attendance', 'Склад': 'Warehouse', 'Опасные операции': 'Risky operations',
   'Настройки': 'Settings', 'Доп. модули': 'Add-ons', 'Дополнительные модули': 'Add-on modules',
+  'Ассистент': 'Assistant', 'Текстовый ассистент': 'Text assistant', 'Спросить': 'Ask',
   // page titles / header
   'Опасные операции на кассе': 'Risky POS operations', 'Аналитика iikoRMS / iikoServer': 'iikoRMS / iikoServer analytics',
   'Проверка...': 'Checking...', 'Сервер недоступен': 'Server unavailable', 'Выйти': 'Log out', 'Войти': 'Log in',

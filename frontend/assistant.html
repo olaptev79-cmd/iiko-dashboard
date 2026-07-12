@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<script>(function(){try{var t=localStorage.getItem('aqba_theme');if(!t){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',t==='light'?'light':'dark');}catch(e){}})();</script>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Ассистент — Aqba Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1A1815">
+</head>
+<body>
+
+<div id="loginScreen">
+  <button class="theme-toggle login-theme-toggle" type="button" aria-label="Переключить тему"></button>
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo">Aqba <span>Dashboard</span></div>
+      <div class="tagline">Аналитика для iikoRMS / iikoServer</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="fServer">Адрес сервера</label>
+        <input id="fServer" type="text" placeholder="mycompany.iiko.it" autocomplete="url" required/>
+        <div class="field-hint">Можно без https:// — добавим автоматически</div>
+      </div>
+      <div class="field">
+        <label for="fLogin">Логин</label>
+        <input id="fLogin" type="text" placeholder="admin" autocomplete="username" required/>
+      </div>
+      <div class="field">
+        <label for="fPassword">Пароль</label>
+        <input id="fPassword" type="password" placeholder="••••••••" autocomplete="current-password" required/>
+      </div>
+      <div class="remember-row">
+        <input id="fRemember" type="checkbox" checked/>
+        <label for="fRemember">Запомнить адрес и логин на этом устройстве</label>
+      </div>
+      <button type="submit" class="btn-primary" id="loginBtn">Войти</button>
+    </form>
+  </div>
+</div>
+
+<div id="appScreen" class="hidden">
+<div id="appLayout">
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-mark">A</div>
+    <div class="brand-text">Aqba<span>Dashboard</span></div>
+  </div>
+  <nav class="side-nav" id="mainNav"></nav>
+  <div class="sidebar-foot">Аналитика iikoRMS / iikoServer</div>
+</aside>
+<div class="main-col">
+<header class="topbar">
+  <div class="header-top">
+    <div class="header-right">
+      <div class="status-pill"><span class="status-dot" id="dot"></span><span id="statusText">Проверка...</span></div>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему"></button>
+      <button class="btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+</header>
+<div class="container">
+<div class="page-title">Текстовый ассистент</div>
+
+<div id="assistantNotice"></div>
+
+<div class="card">
+<h2>Спросите о своих продажах<span class="hint">на русском, обычными словами</span></h2>
+<div id="chatLog" class="chat-log"></div>
+<div class="chat-suggestions" id="chatSuggestions">
+  <button class="chip" type="button" data-q="Какая выручка сегодня?">Выручка сегодня</button>
+  <button class="chip" type="button" data-q="Покажи топ блюд за 7 дней">Топ блюд за неделю</button>
+  <button class="chip" type="button" data-q="Средний чек и динамика">Средний чек</button>
+  <button class="chip" type="button" data-q="Эффективность по сменам за 30 дней">Смены</button>
+  <button class="chip" type="button" data-q="Прогноз выручки">Прогноз</button>
+</div>
+<div class="chat-input-row">
+  <input id="chatInput" type="text" placeholder="Например: выручка за 30 дней по филиалам" maxlength="500"/>
+  <button class="btn-primary" id="chatSendBtn" type="button" style="width:auto;margin-top:0;">Спросить</button>
+</div>
+</div>
+
+</div>
+</div>
+</div>
+</div>
+
+<nav class="bottom-nav" id="bottomNav-wrapper">
+  <div class="bottom-nav-inner" id="bottomNav"></div>
+</nav>
+
+<script src="shared.js"></script>
+<script src="page_assistant.js"></script>
+</body>
+</html>
