@@ -61,6 +61,10 @@ jobs:
         working-directory: ./backend
         run: node --check scheduler.js
 
+      - name: Attendance parser regression test (mock iiko responses)
+        working-directory: ./backend
+        run: node test_attendance.js
+
       - name: Create stub .env for docker-compose validation
         run: cp .env.example .env
 

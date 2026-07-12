@@ -104,6 +104,7 @@ function renderTypesBreakdown() {
 async function loadRisky(days, btn) {
   document.querySelectorAll('#appScreen .period-btns .period-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  loadCancellationReasons(days);
 
   const unavailableEl = document.getElementById('riskyUnavailable');
   const contentEl = document.getElementById('riskyContent');
@@ -146,6 +147,23 @@ async function loadRisky(days, btn) {
     timelineCard.style.display = 'none';
     unavailableEl.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>';
   }
+}
+
+// ---- Причины списаний блюд (#8) ----
+async function loadCancellationReasons(days) {
+  const el = document.getElementById('cancelReasonsTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/cancellation-reasons?days=' + days);
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет данных на этом сервере iiko') + '</div>'; return; }
+    if (!d.reasons.length) { el.innerHTML = '<div class="empty-box">Списаний за период нет</div>'; return; }
+    let head = '<div style="margin-bottom:14px;font-size:14px;color:var(--text);">Всего списаний: <strong>' + fmt(d.totalCount) + '</strong> на сумму <strong>' + fmt(d.totalSum) + ' ₽</strong>';
+    if (!d.hasReasonField) head += ' <span class="hint">(сервер iiko не отдаёт причину — сгруппировано в одну строку)</span>';
+    head += '</div>';
+    el.innerHTML = head + '<table><thead><tr><th>Причина</th><th>Кол-во</th><th>Сумма, ₽</th></tr></thead><tbody>' +
+      d.reasons.map(r => `<tr><td>${esc(r.reason)}</td><td>${fmt(r.count)}</td><td>${fmt(r.sum)}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
 function startPage() {

@@ -438,6 +438,11 @@ app.get(
   wrap((r) => svc.getSalesPlanFact(r.client, r.query.from, r.query.to, r.query.plan))
 );
 
+// Feature: worst dishes (#13), dish margin (#14), cancellation reasons (#8)
+app.get("/api/worst-dishes", requireAuth, wrap((r) => svc.getWorstDishes(r.client, clampDays(r.query.days, 30))));
+app.get("/api/dish-margin", requireAuth, wrap((r) => svc.getDishMargin(r.client, clampDays(r.query.days, 30))));
+app.get("/api/cancellation-reasons", requireAuth, wrap((r) => svc.getCancellationReasons(r.client, clampDays(r.query.days, 30))));
+
 // ---------------- Dashboard admin: users/roles + audit log ----------------
 // Dashboard-UI permissions only (see userStore.js) — separate from iiko's
 // own role model. Every dashboard login gets a viewer/editor/admin role

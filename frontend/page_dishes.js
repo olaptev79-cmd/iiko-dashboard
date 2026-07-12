@@ -5,6 +5,8 @@ async function loadMenu(days, btn) {
   currentDays = days;
   document.querySelectorAll('#appScreen .period-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
+  loadWorstDishes(days);
+  loadMargin(days);
   const el = document.getElementById('menuTable');
   el.innerHTML = '<div class="loading">Загрузка...</div>';
   try {
@@ -62,6 +64,36 @@ onThemeChangeRedrawCharts(() => {
 
 function exportCsv() {
   downloadCsv('/api/export/top-dishes.csv?days=' + currentDays, `top-dishes-${currentDays}d.csv`);
+}
+
+// ---- Аутсайдеры меню (#13) ----
+async function loadWorstDishes(days) {
+  const el = document.getElementById('worstDishesTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/worst-dishes?days=' + days);
+    if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Кол-во</th><th>Выручка, ₽</th></tr></thead><tbody>' +
+      d.dishes.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${fmt(r.amount)}</td><td>${fmt(r.revenue)}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
+// ---- Маржинальность блюд (#14) ----
+async function loadMargin(days) {
+  const el = document.getElementById('marginTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/dish-margin?days=' + days);
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет поля себестоимости на этом сервере iiko') + '</div>'; return; }
+    if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>Блюдо</th><th>Выручка, ₽</th><th>Себест., ₽</th><th>Маржа, ₽</th><th>Маржа, %</th></tr></thead><tbody>' +
+      d.dishes.slice(0, 20).map((r) => {
+        const cls = r.marginPct < 0 ? 'down' : r.marginPct < 25 ? 'flat' : 'up';
+        return `<tr><td>${esc(r.name)}</td><td>${fmt(r.revenue)}</td><td>${fmt(r.cost)}</td><td>${fmt(r.margin)}</td><td class="delta ${cls}">${r.marginPct}%</td></tr>`;
+      }).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
 function startPage() {

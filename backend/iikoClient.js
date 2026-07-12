@@ -417,6 +417,21 @@ class IikoClient {
     });
   }
 
+  /** Per-dish sales plus a dynamically-discovered cost-price field (name
+   *  varies per install — resolved via getSalesColumns()+pickField() by the
+   *  caller). Powers the dish-margin (price vs cost) report (#14). */
+  async getOlapDishCost(from, to, costField) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: true,
+      groupByRowFields: ["DishName", "DishGroup"],
+      aggregateFields: ["DishAmountInt", "DishSumInt", costField].filter(Boolean),
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
   /** Sales grouped by hour of day (0-23) — powers the hourly activity heatmap. */
   async getOlapHourly(from, to) {
     return this.olapPost({

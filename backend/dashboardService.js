@@ -1027,23 +1027,75 @@ async function updateEmployeeCredentials(client, employeeId, actingLogin, { logi
 // Endpoint/response shape is a GUESS (see iikoClient.getAttendance's doc
 // comment) — degrades to {available:false} on any mismatch rather than
 // crashing the page, same convention as every other optional metric here.
-const ATT_EMPLOYEE_ID_PATTERNS = [/^employeeId$/i, /^employee\.id$/i, /^personId$/i];
-const ATT_CLOCKIN_PATTERNS = [/^comeTime$/i, /^dateFrom$/i, /^clockIn$/i, /^startTime$/i];
-const ATT_CLOCKOUT_PATTERNS = [/^leaveTime$/i, /^dateTo$/i, /^clockOut$/i, /^endTime$/i];
+// Ordered by priority (pickField returns the first pattern that matches any
+// field name). Kept anchored/specific — greedy catch-alls like /In$/ would
+// wrongly grab "login"; unrecognised layouts fall through to value-based
+// datetime detection below instead.
+const ATT_EMPLOYEE_ID_PATTERNS = [/^employeeId$/i, /^employee\.id$/i, /^personId$/i, /^userId$/i, /^workerId$/i, /^worker$/i, /^employee$/i];
+const ATT_EMPLOYEE_NAME_PATTERNS = [/^employeeName$/i, /^fullName$/i, /^fio$/i, /^personName$/i, /^workerName$/i, /^name$/i];
+const ATT_CLOCKIN_PATTERNS = [/^comeTime$/i, /^dateFrom$/i, /^clockIn$/i, /^startTime$/i, /^openTime$/i, /^workStart$/i, /^shiftStart$/i, /^timeIn$/i, /^checkIn$/i, /^beginTime$/i, /^attendanceFrom$/i, /^from$/i];
+const ATT_CLOCKOUT_PATTERNS = [/^leaveTime$/i, /^dateTo$/i, /^clockOut$/i, /^endTime$/i, /^closeTime$/i, /^workEnd$/i, /^shiftEnd$/i, /^timeOut$/i, /^checkOut$/i, /^attendanceTo$/i, /^to$/i];
+
+// iiko's attendance payload shape isn't guaranteed — accept the common
+// wrapper keys as well as a bare array.
+function extractAttendanceRows(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== "object") return [];
+  const wrappers = ["items", "employeeAttendances", "attendances", "attendance", "data", "response", "list", "records", "result"];
+  for (const w of wrappers) {
+    if (Array.isArray(data[w])) return data[w];
+    if (data[w] && typeof data[w] === "object" && Array.isArray(data[w].attendance)) return data[w].attendance;
+  }
+  return [];
+}
+
+function looksLikeDateTime(v) {
+  if (v == null || v === "") return false;
+  if (typeof v === "number") return v > 1e11 && v < 2e13; // plausible epoch-millis
+  const s = String(v);
+  // Require a real calendar date (YYYY-MM-DD / DD.MM.YYYY) or a clock time
+  // (HH:MM). A bare id like "emp-1" has a dash but is NOT a datetime.
+  if (!/\d{4}-\d{2}-\d{2}/.test(s) && !/\d{2}\.\d{2}\.\d{4}/.test(s) && !/\d{1,2}:\d{2}/.test(s)) return false;
+  return !isNaN(Date.parse(s));
+}
 
 async function getAttendance(client, from, to, employeeIdFilter) {
   const res = await safe(() => client.getAttendance(from, to));
   if (!res.ok) return { available: false, error: res.error, records: [] };
-  const rows = Array.isArray(res.value) ? res.value : (res.value && res.value.items) || [];
+  const rows = extractAttendanceRows(res.value);
   if (!rows.length) return { available: true, records: [], source: "live" };
 
   const keys = Object.keys(rows[0] || {});
-  const inField = pickField(keys, ATT_CLOCKIN_PATTERNS);
-  if (!inField) {
-    return { available: false, error: "Сервер iiko вернул данные о явках в неожиданном формате", records: [] };
+  let inField = pickField(keys, ATT_CLOCKIN_PATTERNS);
+  let outField = pickField(keys, ATT_CLOCKOUT_PATTERNS);
+
+  // Value-based fallback: when field names don't match, sniff which columns
+  // actually hold datetime values (≥60% of sampled rows). Earliest → clock-in,
+  // next → clock-out. This is what makes the log survive naming differences
+  // between iiko builds without needing to hardcode every possible field name.
+  if (!inField || !outField) {
+    const dtFields = keys.filter((k) => {
+      let hits = 0, seen = 0;
+      for (const row of rows.slice(0, 20)) {
+        if (row[k] != null && row[k] !== "") { seen++; if (looksLikeDateTime(row[k])) hits++; }
+      }
+      return seen > 0 && hits / seen >= 0.6;
+    });
+    if (!inField && dtFields.length >= 1) inField = dtFields[0];
+    if (!outField && dtFields.length >= 2) outField = dtFields.find((f) => f !== inField) || null;
   }
-  const outField = pickField(keys, ATT_CLOCKOUT_PATTERNS);
+
+  if (!inField) {
+    // Diagnostic: surface the real field names so a remaining mismatch is a
+    // one-line pattern fix rather than a dead end.
+    return {
+      available: false,
+      error: "Сервер iiko вернул данные о явках в неожиданном формате. Обнаруженные поля: " + (keys.join(", ") || "нет полей"),
+      records: [],
+    };
+  }
   const empIdField = pickField(keys, ATT_EMPLOYEE_ID_PATTERNS);
+  const empNameField = pickField(keys, ATT_EMPLOYEE_NAME_PATTERNS);
 
   const dirRes = await safe(() => client.getEmployees());
   const nameById = {};
@@ -1054,16 +1106,19 @@ async function getAttendance(client, from, to, employeeIdFilter) {
     });
   }
 
+  const toMs = (v) => (typeof v === "number" ? v : Date.parse(v));
   let records = rows.map((r) => {
     const empId = empIdField ? r[empIdField] : null;
     const clockIn = inField ? r[inField] : null;
     const clockOut = outField ? r[outField] : null;
-    const hours =
-      clockIn && clockOut ? +((new Date(clockOut) - new Date(clockIn)) / 3600000).toFixed(2) : null;
+    const inMs = clockIn != null ? toMs(clockIn) : NaN;
+    const outMs = clockOut != null ? toMs(clockOut) : NaN;
+    const hours = !isNaN(inMs) && !isNaN(outMs) && outMs >= inMs ? +((outMs - inMs) / 3600000).toFixed(2) : null;
+    const inlineName = empNameField ? r[empNameField] : null;
     return {
       employeeId: empId,
-      employeeName: nameById[empId] || "Не указано",
-      date: clockIn ? String(clockIn).slice(0, 10) : null,
+      employeeName: inlineName || nameById[empId] || "Не указано",
+      date: !isNaN(inMs) ? new Date(inMs).toISOString().slice(0, 10) : clockIn ? String(clockIn).slice(0, 10) : null,
       clockIn,
       clockOut,
       hours,
@@ -1072,7 +1127,7 @@ async function getAttendance(client, from, to, employeeIdFilter) {
   if (employeeIdFilter) {
     records = records.filter((r) => String(r.employeeId) === String(employeeIdFilter));
   }
-  records.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  records.sort((a, b) => ((a.date || "") < (b.date || "") ? 1 : (a.date || "") > (b.date || "") ? -1 : 0));
   return { available: true, records, source: "live" };
 }
 
@@ -1244,6 +1299,120 @@ async function getSalesPlanFact(client, from, to, plan) {
   };
 }
 
+// --- Worst / slowest-selling dishes (#13) ---
+// Same SALES top-dishes report, just surfaced from the bottom: dishes that
+// actually sold (amount > 0) but bring the least revenue — candidates to cut
+// or re-price. Zero-sale dishes are excluded (they'd need a separate menu
+// dictionary to enumerate, which this report doesn't carry).
+async function getWorstDishes(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const olapRaw = await client.getOlapTopDishes(from, to);
+  const rows = client.parseOlap(olapRaw)
+    .map((r) => ({
+      name: r["DishName"] || "—",
+      category: r["DishGroup"] || "",
+      amount: parseInt(r["DishAmountInt"] || 0, 10),
+      revenue: +parseFloat(r["DishSumInt"] || 0).toFixed(2),
+    }))
+    .filter((r) => r.amount > 0)
+    .sort((a, b) => a.revenue - b.revenue);
+  return { dishes: rows.slice(0, 20), source: "live" };
+}
+
+// --- Dish margin: price vs cost (#14) ---
+// Needs a cost-price field, whose name varies per install (like every other
+// OLAP field here) — resolved dynamically. If the SALES report on this server
+// doesn't expose one, degrades to { available:false } rather than guessing.
+const DISH_COST_FIELD_PATTERNS = [
+  /^ProductCostBase\.ProductCost$/i,
+  /^DishCostSum$/i,
+  /^ProductCost$/i,
+  /ProductCost/i,
+  /DishCost/i,
+  /CostSum$/i,
+];
+async function getDishMargin(client, days = 30) {
+  const colsRes = await safe(() => getSalesColumns(client));
+  const costField = colsRes.ok ? pickField(colsRes.value.names, DISH_COST_FIELD_PATTERNS) : null;
+  if (!costField) {
+    return {
+      available: false,
+      error: "Сервер iiko не предоставляет поле себестоимости в отчёте по продажам",
+    };
+  }
+  const { from, to } = daysRange(days);
+  const raw = await client.getOlapDishCost(from, to, costField);
+  const dishes = client.parseOlap(raw)
+    .map((r) => {
+      const revenue = +parseFloat(r["DishSumInt"] || 0).toFixed(2);
+      const cost = +parseFloat(r[costField] || 0).toFixed(2);
+      const amount = parseInt(r["DishAmountInt"] || 0, 10);
+      const margin = +(revenue - cost).toFixed(2);
+      const marginPct = revenue > 0 ? +((margin / revenue) * 100).toFixed(1) : 0;
+      return { name: r["DishName"] || "—", category: r["DishGroup"] || "", amount, revenue, cost, margin, marginPct };
+    })
+    .filter((d) => d.revenue > 0)
+    .sort((a, b) => a.marginPct - b.marginPct);
+  return { available: true, dishes, source: "live" };
+}
+
+// --- Cancellation / write-off reasons breakdown (#8) ---
+// Reuses the same SALES report the "risky operations" page already queries,
+// narrowed to written-off dishes grouped by their deletion reason/comment
+// (field name varies per install; if absent, everything collapses into a
+// single "reason not specified" bucket but totals are still shown).
+async function getCancellationReasons(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const colsRes = await safe(() => getSalesColumns(client));
+  if (!colsRes.ok) return { available: false, error: colsRes.error };
+  const { names } = colsRes.value;
+
+  const DELETED = "DeletedWithWriteoff";
+  const DISH_NAME = "DishName";
+  const DISH_SUM = "DishSumInt";
+  const reasonField = pickField(names, [
+    /DeletionComment/i,
+    /RemovalComment/i,
+    /DeleteComment/i,
+    /DeletionReason/i,
+    /RemovalType/i,
+    /StornoReason/i,
+  ]);
+
+  const groupBy = [DELETED, DISH_NAME, reasonField].filter(Boolean);
+  const res = await safe(() => client.getOlapRiskyOps(from, to, groupBy, [DISH_SUM]));
+  if (!res.ok) return { available: false, error: res.error };
+
+  const byReason = {};
+  let totalCount = 0;
+  let totalSum = 0;
+  client.parseOlap(res.value).forEach((r) => {
+    const flag = String(r[DELETED] || "").toUpperCase();
+    const isDeleted = flag && flag !== "NOT_DELETED" && flag !== "FALSE" && flag !== "0";
+    if (!isDeleted) return;
+    const reason = (reasonField && String(r[reasonField] || "").trim()) || "Причина не указана";
+    const sum = parseFloat(r[DISH_SUM] || 0);
+    if (!byReason[reason]) byReason[reason] = { reason, count: 0, sum: 0 };
+    byReason[reason].count += 1;
+    byReason[reason].sum += sum;
+    totalCount += 1;
+    totalSum += sum;
+  });
+
+  const reasons = Object.values(byReason)
+    .map((r) => ({ reason: r.reason, count: r.count, sum: +r.sum.toFixed(2) }))
+    .sort((a, b) => b.sum - a.sum);
+
+  return {
+    available: true,
+    reasons,
+    totalCount,
+    totalSum: +totalSum.toFixed(2),
+    hasReasonField: !!reasonField,
+    source: "live",
+  };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -1268,4 +1437,7 @@ module.exports = {
   getAverageCheckTrend,
   getYearOverYear,
   getSalesPlanFact,
+  getWorstDishes,
+  getDishMargin,
+  getCancellationReasons,
 };
