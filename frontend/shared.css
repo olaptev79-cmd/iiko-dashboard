@@ -401,6 +401,19 @@ canvas{max-width:100%;max-height:280px;}
 .widget-pin:hover{color:var(--accent);background:var(--accent-soft);}
 .widget-tile.pinned .widget-pin{opacity:1;color:var(--accent);}
 
+/* ---------- Public read-only + embed pages (Wave 6, #38/#39) ---------- */
+.public-wrap{max-width:760px;margin:0 auto;padding:48px 20px;}
+.public-brand{font-family:var(--font-display);font-size:26px;font-weight:700;color:var(--text);}
+.public-brand span{color:var(--accent);}
+.public-sub{color:var(--muted);font-size:14px;margin:4px 0 28px;}
+.public-foot{margin-top:20px;color:var(--faint);font-size:12px;font-family:var(--font-mono);text-align:right;}
+.embed-wrap{padding:12px;}
+.embed-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}
+.embed-cell{background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;}
+.embed-label{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);}
+.embed-value{font-family:var(--font-mono);font-size:18px;font-weight:700;color:var(--text);margin-top:4px;}
+.embed-foot{margin-top:8px;color:var(--faint);font-size:10px;font-family:var(--font-mono);text-align:right;}
+
 /* ---------- Register heatmap (Wave 4, #5) ---------- */
 .heatmap-scroll{overflow-x:auto;}
 .heatmap{border-collapse:collapse;}

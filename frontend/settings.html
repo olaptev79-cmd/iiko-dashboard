@@ -83,6 +83,23 @@
 </div>
 
 <div class="card">
+<h2>Токены доступа<span class="hint">публичные ссылки / встраивание / API-ключ BI — отдают только сводные KPI, без ПДн</span></h2>
+<div class="date-range-row">
+  <div class="field"><label for="tokScope">Тип</label>
+    <select id="tokScope">
+      <option value="public">Публичная ссылка (только чтение)</option>
+      <option value="embed">Встраивание в iframe</option>
+      <option value="external-bi">API-ключ для BI-систем</option>
+    </select>
+  </div>
+  <div class="field"><label for="tokLabel">Название</label><input id="tokLabel" type="text" placeholder="напр. «Владельцу»"/></div>
+  <div class="field"><label for="tokTtl">Срок, дней (≤30)</label><input id="tokTtl" type="number" min="1" max="30" placeholder="30"/></div>
+  <button class="btn-primary" id="tokCreateBtn" type="button" style="width:auto;margin-top:0;">Создать</button>
+</div>
+<div id="tokensContainer"><div class="loading">Загрузка...</div></div>
+</div>
+
+<div class="card">
 <h2>Журнал действий<span class="hint">последние события: входы, изменения ролей, отказы в доступе</span></h2>
 <div id="auditContainer"><div class="loading">Загрузка...</div></div>
 <div id="auditPagination"></div>

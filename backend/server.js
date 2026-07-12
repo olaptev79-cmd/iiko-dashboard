@@ -13,6 +13,8 @@ const auditLog = require("./auditLog");
 const notifier = require("./notifier");
 const totp = require("./totp");
 const scheduler = require("./scheduler");
+const { store: tokenStore } = require("./tokenStore");
+const snapshotStore = require("./snapshotStore");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -319,7 +321,12 @@ function clampDays(raw, fallback) {
 }
 
 app.get("/api/health", requireAuth, wrap((r) => svc.getStatus(r.client, r.sessionMeta)));
-app.get("/api/dashboard", requireAuth, wrap((r) => svc.getSummary(r.client)));
+app.get("/api/dashboard", requireAuth, wrap(async (r) => {
+  const summary = await svc.getSummary(r.client);
+  // Cache a curated, non-PII snapshot for scoped-token consumers (Wave 6).
+  snapshotStore.set(summary);
+  return summary;
+}));
 app.get("/api/chart", requireAuth, wrap((r) => svc.getChart(r.client, clampDays(r.query.days, 7))));
 app.get("/api/weekday-breakdown", requireAuth, wrap((r) => svc.getWeekdayBreakdown(r.client, clampDays(r.query.days, 30))));
 app.get("/api/hourly-activity", requireAuth, wrap((r) => svc.getHourlyActivity(r.client, clampDays(r.query.days, 7))));
@@ -535,6 +542,72 @@ function csvEscape(value) {
   const s = String(value == null ? "" : value);
   return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
+
+// ---------------- Wave 6: scoped tokens (public link / embed / BI API key) ----------------
+//
+// Token consumers are UNAUTHENTICATED (no iiko session): they only ever read
+// the curated, non-PII snapshot (snapshotStore) — never live iiko data, never
+// employee/department detail. Three scopes differ only in how the token is
+// carried: BI key via Authorization header, public link + embed via ?token=.
+
+function requireScopedToken(scope) {
+  return (req, res, next) => {
+    const auth = req.headers["authorization"] || "";
+    const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : null;
+    const token = bearer || (typeof req.query.token === "string" ? req.query.token : null);
+    const rec = tokenStore.validate(token, scope);
+    if (!rec) {
+      // Never distinguish expired/revoked/wrong-scope/never-existed to the caller.
+      auditLog.record({ actingLogin: "token", action: "token_denied", target: scope, result: "denied", ip: req.ip });
+      return res.status(401).json({ error: "invalid_or_expired_token" });
+    }
+    auditLog.record({ actingLogin: "token:" + (rec.label || scope), action: "token_use", target: scope, result: "ok", ip: req.ip });
+    req.tokenRec = rec;
+    next();
+  };
+}
+
+// Tighter per-IP limit for the token-authed public surface (on top of global).
+const externalRateLimit = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { error: "too_many_requests" } });
+
+function sendSnapshot(res) {
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  const snap = snapshotStore.get();
+  if (!snap) return res.status(503).json({ error: "Данные ещё не готовы — откройте дашборд авторизованным пользователем хотя бы раз" });
+  res.json(snap);
+}
+
+// #40 BI API key, #38 public read-only link, #39 iframe embed — same curated
+// snapshot, three distinct scopes so a token minted for one can't be used for another.
+app.get("/api/external/summary", externalRateLimit, requireScopedToken("external-bi"), (_req, res) => sendSnapshot(res));
+app.get("/api/public/summary", externalRateLimit, requireScopedToken("public"), (_req, res) => sendSnapshot(res));
+app.get("/api/embed/summary", externalRateLimit, requireScopedToken("embed"), (_req, res) => sendSnapshot(res));
+
+// ---- Admin: scoped-token management ----
+const TOKEN_SCOPE_RE = /^(external-bi|public|embed)$/;
+const MAX_TOKEN_TTL_DAYS = 30;
+app.post("/api/admin/tokens", requireAuth, requireRole("admin"), (req, res) => {
+  const { scope, label, ttlDays } = req.body || {};
+  if (!TOKEN_SCOPE_RE.test(String(scope))) return res.status(400).json({ error: "scope должен быть одним из: external-bi, public, embed" });
+  let ttlMs = null;
+  if (ttlDays != null && ttlDays !== "") {
+    const d = Number(ttlDays);
+    if (!Number.isFinite(d) || d <= 0 || d > MAX_TOKEN_TTL_DAYS) return res.status(400).json({ error: `Срок жизни — число от 1 до ${MAX_TOKEN_TTL_DAYS} дней` });
+    ttlMs = d * 86400000;
+  } else if (scope !== "external-bi") {
+    // public / embed links MUST expire; only the BI key may be long-lived.
+    ttlMs = MAX_TOKEN_TTL_DAYS * 86400000;
+  }
+  const plaintext = tokenStore.create({ scope, createdBy: req.sessionMeta.login, label: String(label || "").slice(0, 80), ttlMs });
+  auditLog.record({ actingLogin: req.sessionMeta.login, action: "token_create", target: scope, result: "ok", ip: req.ip });
+  res.json({ ok: true, token: plaintext, scope, ttlMs });
+});
+app.get("/api/admin/tokens", requireAuth, requireRole("admin"), wrap(async () => ({ tokens: tokenStore.list() })));
+app.delete("/api/admin/tokens/:id", requireAuth, requireRole("admin"), (req, res) => {
+  const ok = tokenStore.revokeById(String(req.params.id));
+  auditLog.record({ actingLogin: req.sessionMeta.login, action: "token_revoke", target: String(req.params.id), result: ok ? "ok" : "denied", ip: req.ip });
+  res.json({ ok });
+});
 
 // ---------------- Misc ----------------
 

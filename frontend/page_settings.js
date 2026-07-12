@@ -171,6 +171,64 @@ async function loadAudit() {
   }
 }
 
+// ---------------- Scoped tokens (Wave 6) ----------------
+const TOKEN_SCOPE_LABELS = { public: 'Публичная ссылка', embed: 'Встраивание', 'external-bi': 'API-ключ BI' };
+
+async function loadTokens() {
+  const el = document.getElementById('tokensContainer');
+  try {
+    const d = await api('/api/admin/tokens');
+    if (!d.tokens.length) { el.innerHTML = '<div class="empty-box">Токенов пока нет</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>Тип</th><th>Название</th><th>Создан</th><th>Истекает</th><th>Использован</th><th>Статус</th><th></th></tr></thead><tbody>' +
+      d.tokens.map((t) => `<tr><td>${esc(TOKEN_SCOPE_LABELS[t.scope] || t.scope)}</td><td>${esc(t.label || '—')}</td><td>${fmtTs(t.createdAt)}</td><td>${t.expiresAt ? fmtTs(t.expiresAt) : 'бессрочно'}</td><td>${t.lastUsedAt ? fmtTs(t.lastUsedAt) : '—'}</td><td>${t.revoked ? '<span class="delta down">отозван</span>' : '<span class="delta up">активен</span>'}</td><td>${t.revoked ? '' : `<button class="btn-row-action" data-revoke="${esc(t.id)}">Отозвать</button>`}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) {
+    if (e.message === 'not_authenticated') return;
+    el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function createToken() {
+  const scope = document.getElementById('tokScope').value;
+  const label = document.getElementById('tokLabel').value.trim();
+  const ttlDays = document.getElementById('tokTtl').value;
+  let d;
+  try {
+    d = await api('/api/admin/tokens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, label, ttlDays: ttlDays || undefined }) });
+  } catch (e) { toast('Не удалось создать токен: ' + (e.message || 'ошибка'), 'error'); return; }
+  const origin = window.location.origin;
+  let body;
+  if (scope === 'public') {
+    const url = origin + '/public.html?token=' + encodeURIComponent(d.token);
+    body = '<p style="margin-bottom:10px;color:var(--muted);font-size:13px;">Публичная ссылка (только сводные KPI). Токен показывается один раз — скопируйте:</p><textarea readonly class="gsearch-input" style="width:100%;height:70px;">' + esc(url) + '</textarea>';
+  } else if (scope === 'embed') {
+    const code = '<iframe src="' + origin + '/embed.html?token=' + encodeURIComponent(d.token) + '" width="360" height="220" style="border:0;"></iframe>';
+    body = '<p style="margin-bottom:10px;color:var(--muted);font-size:13px;">Код для встраивания. По умолчанию работает на этом же домене; для сторонних сайтов добавьте их в frame-ancestors в nginx.conf:</p><textarea readonly class="gsearch-input" style="width:100%;height:90px;">' + esc(code) + '</textarea>';
+  } else {
+    body = '<p style="margin-bottom:10px;color:var(--muted);font-size:13px;">API-ключ для BI-систем. Показывается один раз:</p><textarea readonly class="gsearch-input" style="width:100%;height:50px;">' + esc(d.token) + '</textarea>' +
+      '<p style="margin-top:10px;color:var(--muted);font-size:12px;word-break:break-all;">Пример: curl -H "Authorization: Bearer &lt;ключ&gt;" ' + esc(origin) + '/api/external/summary</p>';
+  }
+  openModal({ title: 'Токен создан', bodyHtml: body, footerHtml: '<button type="button" class="btn-primary" id="tokDoneBtn" style="width:auto;margin-top:0;">Готово</button>', onMount: (m) => { m.querySelector('#tokDoneBtn').addEventListener('click', closeModal); const ta = m.querySelector('textarea'); if (ta) { ta.focus(); ta.select(); } } });
+  document.getElementById('tokLabel').value = '';
+  document.getElementById('tokTtl').value = '';
+  loadTokens();
+  loadAudit();
+}
+
+const _tokCreateBtn = document.getElementById('tokCreateBtn');
+if (_tokCreateBtn) _tokCreateBtn.addEventListener('click', createToken);
+const _tokContainer = document.getElementById('tokensContainer');
+if (_tokContainer) _tokContainer.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-revoke]');
+  if (!btn) return;
+  try {
+    await api('/api/admin/tokens/' + encodeURIComponent(btn.dataset.revoke), { method: 'DELETE' });
+    toast('Токен отозван', 'success');
+    loadTokens();
+    loadAudit();
+  } catch (err) { toast('Не удалось отозвать: ' + (err.message || 'ошибка'), 'error'); }
+});
+
 async function startPage() {
   const unavailableEl = document.getElementById('settingsUnavailable');
   const contentEl = document.getElementById('settingsContent');
@@ -184,4 +242,5 @@ async function startPage() {
   }
   loadTotpSection();
   loadAudit();
+  loadTokens();
 }
