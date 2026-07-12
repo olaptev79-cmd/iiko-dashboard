@@ -448,6 +448,33 @@ class IikoClient {
     });
   }
 
+  /** Per-dish sales split by day, for demand-variability (XYZ) analysis (#2). */
+  async getOlapDishByDate(from, to) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: false,
+      groupByRowFields: ["DishName", "OpenDate.Typed"],
+      aggregateFields: ["DishAmountInt", "DishSumInt"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
+  /** Sales grouped by cashier + hour of day, for the register heatmap (#5).
+   *  `cashierField` is resolved dynamically by the caller. */
+  async getOlapCashierHourly(from, to, cashierField) {
+    return this.olapPost({
+      reportType: "SALES",
+      buildSummary: false,
+      groupByRowFields: [cashierField, "HourOpen"],
+      aggregateFields: ["DishSumInt", "DishAmountInt"],
+      filters: {
+        "OpenDate.Typed": this.dateRangeFilter(from, to),
+      },
+    });
+  }
+
   /** Sales grouped by hour of day (0-23) — powers the hourly activity heatmap. */
   async getOlapHourly(from, to) {
     return this.olapPost({

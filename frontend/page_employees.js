@@ -144,9 +144,45 @@ async function saveCredentials(employeeId, modalEl) {
   }
 }
 
+// ---- #18 Геймификация ----
+async function loadGamification() {
+  const el = document.getElementById('gamificationContainer');
+  try {
+    const d = await api('/api/gamification?days=30');
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет данных') + '</div>'; return; }
+    if (!d.players.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    const medal = (r) => r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : String(r);
+    el.innerHTML = '<table><thead><tr><th>#</th><th>Сотрудник</th><th>Очки</th><th>Бейджи</th></tr></thead><tbody>' +
+      d.players.map((p) => `<tr><td>${medal(p.rank)}</td><td>${esc(p.name)}</td><td><strong>${fmt(p.points)}</strong></td>` +
+        `<td>${p.badges.map((b) => `<span class="badge badge-a" style="margin-right:4px;">${esc(b)}</span>`).join('') || '—'}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
+// ---- #5 Тепловая карта касс ----
+async function loadHeatmap() {
+  const el = document.getElementById('heatmapContainer');
+  try {
+    const d = await api('/api/register-heatmap?days=30');
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет данных') + '</div>'; return; }
+    if (!d.cashiers.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    const hoursHeader = Array.from({ length: 24 }, (_, h) => `<th class="hm-h">${h}</th>`).join('');
+    const rows = d.cashiers.map((c) => {
+      const cells = c.hours.map((v, h) => {
+        const op = v > 0 ? (0.12 + 0.88 * v / d.maxCell).toFixed(2) : 0;
+        return `<td class="hm-cell" style="background:rgba(224,147,46,${op});" title="${esc(c.name)} · ${h}:00 · ${fmt(v)} ₽"></td>`;
+      }).join('');
+      return `<tr><td class="hm-name">${esc(c.name)}</td>${cells}</tr>`;
+    }).join('');
+    el.innerHTML = '<div class="heatmap-scroll"><table class="heatmap"><thead><tr><th class="hm-name"></th>' + hoursHeader + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
 function startPage() {
   loadPerformance(30);
   loadDirectory();
+  loadGamification();
+  loadHeatmap();
 }
 
 onThemeChangeRedrawCharts(() => { loadPerformance(30); });

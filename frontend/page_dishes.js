@@ -8,6 +8,9 @@ async function loadMenu(days, btn) {
   loadWorstDishes(days);
   loadMargin(days);
   loadDishRepeats(days);
+  loadAbcXyz(days);
+  loadMenuEng(days);
+  loadCombos(days);
   const el = document.getElementById('menuTable');
   el.innerHTML = '<div class="loading">Загрузка...</div>';
   try {
@@ -107,6 +110,51 @@ async function loadDishRepeats(days) {
     if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Повторов блюд в одном чеке за период не найдено</div>'; return; }
     el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Заказов с повтором</th><th>Доп. порций</th></tr></thead><tbody>' +
       d.dishes.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${fmt(r.repeatOrders)}</td><td>${fmt(r.extraUnits)}</td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
+// ---- #2 ABC-XYZ ----
+async function loadAbcXyz(days) {
+  const el = document.getElementById('abcXyzTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/abc-xyz?days=' + days);
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет данных') + '</div>'; return; }
+    if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    const xcls = (x) => x === 'X' ? 'badge-a' : x === 'Y' ? 'badge-b' : 'badge-c';
+    el.innerHTML = '<table><thead><tr><th>#</th><th>Блюдо</th><th>Выручка, ₽</th><th>ABC</th><th>Разброс</th><th>XYZ</th><th>Класс</th></tr></thead><tbody>' +
+      d.dishes.slice(0, 30).map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${fmt(r.revenue)}</td><td><span class="badge badge-${esc(String(r.abc).toLowerCase())}">${esc(r.abc)}</span></td><td>${r.cov}%</td><td><span class="badge ${xcls(r.xyz)}">${esc(r.xyz)}</span></td><td><strong>${esc(r.combo)}</strong></td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
+// ---- #11 Меню-инжиниринг ----
+async function loadMenuEng(days) {
+  const el = document.getElementById('menuEngTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/menu-engineering?days=' + days);
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет себестоимости') + '</div>'; return; }
+    if (!d.dishes.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
+    const qcls = { star: 'badge-a', plowhorse: 'badge-b', puzzle: 'badge-b', dog: 'badge-c' };
+    const head = '<div style="margin-bottom:12px;font-size:12.5px;color:var(--muted);">⭐ Звёзды: ' + d.counts.star + ' · 🐴 Лошадки: ' + d.counts.plowhorse + ' · ❓ Загадки: ' + d.counts.puzzle + ' · 🐕 Собаки: ' + d.counts.dog + '</div>';
+    el.innerHTML = head + '<table><thead><tr><th>Блюдо</th><th>Кол-во</th><th>Маржа,%</th><th>Квадрант</th></tr></thead><tbody>' +
+      d.dishes.slice(0, 25).map((r) => `<tr><td>${esc(r.name)}</td><td>${fmt(r.amount)}</td><td>${r.marginPct}%</td><td><span class="badge ${qcls[r.quadrant]}">${esc(r.quadrantLabel)}</span></td></tr>`).join('') +
+      '</tbody></table>';
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
+// ---- #12 Сочетания блюд ----
+async function loadCombos(days) {
+  const el = document.getElementById('combosTable');
+  el.innerHTML = '<div class="loading">Загрузка...</div>';
+  try {
+    const d = await api('/api/dish-combos?days=' + days);
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет номера заказа') + '</div>'; return; }
+    if (!d.pairs.length) { el.innerHTML = '<div class="empty-box">Частых сочетаний не найдено</div>'; return; }
+    el.innerHTML = '<table><thead><tr><th>#</th><th>Сочетание</th><th>Раз вместе</th></tr></thead><tbody>' +
+      d.pairs.map((p, i) => `<tr><td>${i + 1}</td><td>${esc(p.pair)}</td><td>${fmt(p.count)}</td></tr>`).join('') +
       '</tbody></table>';
   } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }

@@ -446,6 +446,15 @@ app.get("/api/cancellation-reasons", requireAuth, wrap((r) => svc.getCancellatio
 // Feature: shift efficiency (#16), dish repeats (#7), attendance anomalies (#17)
 app.get("/api/shift-efficiency", requireAuth, wrap((r) => svc.getShiftEfficiency(r.client, clampDays(r.query.days, 30))));
 app.get("/api/dish-repeats", requireAuth, wrap((r) => svc.getDishRepeats(r.client, clampDays(r.query.days, 30))));
+
+// Wave 4: ABC-XYZ (#2), menu engineering (#11), dish combos (#12),
+// gamification (#18), simplified P&L (#28), register heatmap (#5)
+app.get("/api/abc-xyz", requireAuth, wrap((r) => svc.getAbcXyz(r.client, clampDays(r.query.days, 30))));
+app.get("/api/menu-engineering", requireAuth, wrap((r) => svc.getMenuEngineering(r.client, clampDays(r.query.days, 30))));
+app.get("/api/dish-combos", requireAuth, wrap((r) => svc.getDishCombos(r.client, clampDays(r.query.days, 30))));
+app.get("/api/gamification", requireAuth, wrap((r) => svc.getEmployeeGamification(r.client, clampDays(r.query.days, 30))));
+app.get("/api/pnl", requireAuth, wrap((r) => svc.getSimplePnl(r.client, clampDays(r.query.days, 30))));
+app.get("/api/register-heatmap", requireAuth, wrap((r) => svc.getRegisterHeatmap(r.client, clampDays(r.query.days, 30))));
 app.get(
   "/api/attendance-anomalies",
   requireAuth,

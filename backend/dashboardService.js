@@ -1510,6 +1510,159 @@ async function getDishRepeats(client, days = 30) {
   return { available: true, dishes, source: "live" };
 }
 
+// ========================= Wave 4: advanced analytics =========================
+
+// --- #2 ABC-XYZ: revenue class (ABC) × demand-stability class (XYZ) ---
+async function getAbcXyz(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const raw = await safe(() => client.getOlapDishByDate(from, to));
+  if (!raw.ok) return { available: false, error: raw.error, dishes: [] };
+  const byDish = {};
+  const allDates = new Set();
+  client.parseOlap(raw.value).forEach((r) => {
+    const name = r["DishName"] || "—";
+    const d = (r["OpenDate.Typed"] || "").slice(0, 10);
+    if (d) allDates.add(d);
+    const qty = parseFloat(r["DishAmountInt"] || 0);
+    const rev = parseFloat(r["DishSumInt"] || 0);
+    if (!byDish[name]) byDish[name] = { revenue: 0, byDate: {} };
+    byDish[name].revenue += rev;
+    if (d) byDish[name].byDate[d] = (byDish[name].byDate[d] || 0) + qty;
+  });
+  const dates = Array.from(allDates);
+  const rows = Object.entries(byDish).map(([name, v]) => {
+    const qtys = dates.map((d) => v.byDate[d] || 0);
+    const mean = qtys.length ? qtys.reduce((s, x) => s + x, 0) / qtys.length : 0;
+    const variance = qtys.length ? qtys.reduce((s, x) => s + (x - mean) ** 2, 0) / qtys.length : 0;
+    const cov = mean > 0 ? Math.sqrt(variance) / mean : 0;
+    const xyz = cov <= 0.1 ? "X" : cov <= 0.25 ? "Y" : "Z";
+    return { name, revenue: +v.revenue.toFixed(2), cov: +(cov * 100).toFixed(1), xyz };
+  }).sort((a, b) => b.revenue - a.revenue);
+  const total = rows.reduce((s, r) => s + r.revenue, 0);
+  let cum = 0;
+  rows.forEach((r) => { cum += r.revenue; const p = total > 0 ? (cum / total) * 100 : 0; r.abc = p <= 80 ? "A" : p <= 95 ? "B" : "C"; r.combo = r.abc + r.xyz; });
+  return { available: true, dishes: rows, daysObserved: dates.length, source: "live" };
+}
+
+// --- #11 Menu engineering: popularity × profitability quadrant ---
+async function getMenuEngineering(client, days = 30) {
+  const marginData = await getDishMargin(client, days);
+  if (!marginData.available) return { available: false, error: marginData.error, dishes: [] };
+  const dishes = marginData.dishes;
+  if (!dishes.length) return { available: true, dishes: [], counts: { star: 0, plowhorse: 0, puzzle: 0, dog: 0 }, source: "live" };
+  const avgPopularity = dishes.reduce((s, d) => s + d.amount, 0) / dishes.length;
+  const avgMargin = dishes.reduce((s, d) => s + d.marginPct, 0) / dishes.length;
+  const counts = { star: 0, plowhorse: 0, puzzle: 0, dog: 0 };
+  const QLABEL = { star: "Звезда", plowhorse: "Рабочая лошадка", puzzle: "Загадка", dog: "Собака" };
+  const withClass = dishes.map((d) => {
+    const popular = d.amount >= avgPopularity;
+    const profitable = d.marginPct >= avgMargin;
+    const q = popular && profitable ? "star" : popular ? "plowhorse" : profitable ? "puzzle" : "dog";
+    counts[q]++;
+    return { name: d.name, amount: d.amount, revenue: d.revenue, marginPct: d.marginPct, quadrant: q, quadrantLabel: QLABEL[q] };
+  });
+  return { available: true, dishes: withClass, counts, avgPopularity: +avgPopularity.toFixed(1), avgMargin: +avgMargin.toFixed(1), source: "live" };
+}
+
+// --- #12 Dish combinations frequently ordered together ---
+async function getDishCombos(client, days = 30) {
+  const colsRes = await safe(() => getSalesColumns(client));
+  const orderField = colsRes.ok ? pickField(colsRes.value.names, ORDER_NUM_FIELD_PATTERNS) : null;
+  if (!orderField) return { available: false, error: "Сервер iiko не отдаёт номер заказа — анализ сочетаний недоступен", pairs: [] };
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapDishRepeats(from, to, orderField));
+  if (!res.ok) return { available: false, error: res.error, pairs: [] };
+  const orders = {};
+  client.parseOlap(res.value).forEach((r) => {
+    const oid = r[orderField];
+    const name = r["DishName"];
+    if (oid == null || !name) return;
+    if (!orders[oid]) orders[oid] = new Set();
+    orders[oid].add(name);
+  });
+  const pairCount = {};
+  Object.values(orders).forEach((set) => {
+    const arr = Array.from(set);
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        const key = [arr[i], arr[j]].sort().join(" + ");
+        pairCount[key] = (pairCount[key] || 0) + 1;
+      }
+    }
+  });
+  const pairs = Object.entries(pairCount).map(([pair, count]) => ({ pair, count })).sort((a, b) => b.count - a.count).slice(0, 20);
+  return { available: true, pairs, ordersAnalyzed: Object.keys(orders).length, source: "live" };
+}
+
+// --- #18 Employee gamification: points + badges over sales performance ---
+async function getEmployeeGamification(client, days = 30) {
+  const perf = await getEmployeePerformance(client, days);
+  if (!perf.available) return { available: false, error: perf.error, players: [] };
+  const emps = perf.employees;
+  if (!emps.length) return { available: true, players: [], source: "live" };
+  const maxRev = Math.max(...emps.map((e) => e.revenue));
+  const maxAvg = Math.max(...emps.map((e) => e.avgCheck));
+  const avgOrders = emps.reduce((s, x) => s + x.orders, 0) / emps.length;
+  const players = emps.map((e, i) => {
+    const points = (maxRev > 0 ? Math.round((e.revenue / maxRev) * 600) : 0) + (maxAvg > 0 ? Math.round((e.avgCheck / maxAvg) * 400) : 0);
+    const badges = [];
+    if (i === 0) badges.push("Лидер по выручке");
+    if (maxAvg > 0 && e.avgCheck === maxAvg) badges.push("Лучший средний чек");
+    if (e.orders >= avgOrders) badges.push("Выше среднего по чекам");
+    return { name: e.name, revenue: e.revenue, orders: e.orders, avgCheck: e.avgCheck, points, badges };
+  }).sort((a, b) => b.points - a.points).map((p, i) => ({ ...p, rank: i + 1 }));
+  return { available: true, players, source: "live" };
+}
+
+// --- #28 Simplified P&L: revenue − estimated COGS (write-offs) = gross profit ---
+async function getSimplePnl(client, days = 30) {
+  const { from, to } = daysRange(days);
+  const salesRes = await safe(() => client.getOlapSales(from, to));
+  const revenue = salesRes.ok ? +aggregateSales(client, salesRes.value).revenue.toFixed(2) : 0;
+  const wh = await getWarehouse(client, days);
+  const cogs = wh.available ? +(wh.totalCost || 0).toFixed(2) : null;
+  const grossProfit = cogs != null ? +(revenue - cogs).toFixed(2) : null;
+  const grossMarginPct = cogs != null && revenue > 0 ? +((grossProfit / revenue) * 100).toFixed(1) : null;
+  return {
+    available: salesRes.ok,
+    error: salesRes.ok ? undefined : salesRes.error,
+    revenue,
+    cogs,
+    cogsAvailable: wh.available,
+    grossProfit,
+    grossMarginPct,
+    note: "Себестоимость оценивается по складским списаниям iiko — это не полноценный бухгалтерский P&L",
+    source: "live",
+  };
+}
+
+// --- #5 Register/cashier heatmap: revenue by cashier × hour of day ---
+async function getRegisterHeatmap(client, days = 30) {
+  const colsRes = await safe(() => getSalesColumns(client));
+  if (!colsRes.ok) return { available: false, error: colsRes.error, cashiers: [] };
+  const cashierField = pickField(colsRes.value.names, CASHIER_FIELD_PATTERNS) || pickField(colsRes.value.names, WAITER_FIELD_PATTERNS);
+  if (!cashierField) return { available: false, error: "Сервер iiko не предоставляет поле кассира/официанта", cashiers: [] };
+  const { from, to } = daysRange(days);
+  const res = await safe(() => client.getOlapCashierHourly(from, to, cashierField));
+  if (!res.ok) return { available: false, error: res.error, cashiers: [] };
+  const byCashier = {};
+  client.parseOlap(res.value).forEach((r) => {
+    const name = r[cashierField];
+    if (!name) return;
+    let h = parseInt(r["HourOpen"], 10);
+    if (Number.isNaN(h)) { const raw = r["HourOpen"]; h = raw != null ? parseInt(String(raw).slice(0, 2), 10) : NaN; }
+    if (Number.isNaN(h) || h < 0 || h > 23) return;
+    if (!byCashier[name]) byCashier[name] = Array.from({ length: 24 }, () => 0);
+    byCashier[name][h] += parseFloat(r["DishSumInt"] || 0);
+  });
+  const cashiers = Object.entries(byCashier)
+    .map(([name, hours]) => ({ name, hours: hours.map((x) => +x.toFixed(0)), total: +hours.reduce((s, x) => s + x, 0).toFixed(0) }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 20);
+  const maxCell = Math.max(1, ...cashiers.flatMap((c) => c.hours));
+  return { available: true, cashiers, maxCell, source: "live" };
+}
+
 module.exports = {
   getStatus,
   getSummary,
@@ -1540,4 +1693,10 @@ module.exports = {
   getShiftEfficiency,
   getAttendanceAnomalies,
   getDishRepeats,
+  getAbcXyz,
+  getMenuEngineering,
+  getDishCombos,
+  getEmployeeGamification,
+  getSimplePnl,
+  getRegisterHeatmap,
 };

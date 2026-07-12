@@ -159,6 +159,25 @@ async function loadShiftEfficiency() {
   } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
 }
 
+// ---- #28 Упрощённый P&L ----
+async function loadPnl() {
+  const el = document.getElementById('pnlContainer');
+  try {
+    const d = await api('/api/pnl?days=30');
+    if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет данных') + '</div>'; return; }
+    let html = '<div class="yoy-row">' +
+      `<div class="yoy-tile"><div class="yoy-label">Выручка</div><div class="yoy-value">${fmt(d.revenue)} ₽</div></div>`;
+    if (d.cogsAvailable) {
+      html += `<div class="yoy-tile"><div class="yoy-label">Себестоимость (списания)</div><div class="yoy-value">${fmt(d.cogs)} ₽</div></div>` +
+        `<div class="yoy-tile"><div class="yoy-label">Валовая прибыль</div><div class="yoy-value">${fmt(d.grossProfit)} ₽</div><div class="delta ${d.grossMarginPct >= 0 ? 'up' : 'down'}">${d.grossMarginPct}%</div></div>`;
+    } else {
+      html += `<div class="yoy-tile"><div class="yoy-label">Себестоимость</div><div class="yoy-value">н/д</div><div class="yoy-prev">склад недоступен</div></div>`;
+    }
+    html += '</div><div class="pf-remaining" style="margin-top:12px;">' + esc(d.note) + '</div>';
+    el.innerHTML = html;
+  } catch (e) { el.innerHTML = '<div class="error-box">Ошибка: ' + esc(e.message) + '</div>'; }
+}
+
 function startPage() {
   loadChart(30);
   loadWeekday();
@@ -166,6 +185,7 @@ function startPage() {
   loadAvgTrend(30);
   loadYoY();
   loadShiftEfficiency();
+  loadPnl();
   // Предзаполняем период план/факта последними 30 днями.
   const to = new Date();
   const from = new Date();
