@@ -60,17 +60,49 @@ app.use(
   })
 );
 
+// Is this Origin allowed to make a CREDENTIALED request? Only:
+//   - no Origin at all (same-origin GET, curl, server-to-server BI key)
+//   - an Origin explicitly listed in ALLOWED_ORIGINS
+//   - a true same-origin request (Origin host === this request's Host — works
+//     both on plain http://localhost and behind the HTTPS tunnel, since nginx
+//     forwards the public Host header).
+// SECURITY: the old default reflected ANY Origin back with credentials:true
+// when ALLOWED_ORIGINS was unset (the common case), which is exactly the
+// misconfiguration that lets a malicious site read authenticated responses.
+// We now deny cross-origin credentialed requests by default.
+function isAllowedOrigin(origin, req) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.length && ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    if (new URL(origin).host === req.headers.host) return true;
+  } catch {
+    /* malformed Origin -> not allowed */
+  }
+  return false;
+}
+
 app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // same-origin / curl / server-to-server
-      if (ALLOWED_ORIGINS.length === 0) return cb(null, true); // dev fallback
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      cb(new Error("Not allowed by CORS"));
-    },
-    credentials: true,
-  })
+  cors((req, cb) =>
+    cb(null, {
+      origin: isAllowedOrigin(req.headers.origin, req),
+      credentials: true,
+    })
+  )
 );
+
+// CSRF defense-in-depth (on top of the sameSite=lax session cookie): reject any
+// state-changing request whose Origin header is cross-site. Requests with no
+// Origin (non-browser clients — curl, the BI API key) are not CSRF vectors and
+// pass through; the token-authed public GET endpoints are unaffected (GET).
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+app.use("/api/", (req, res, next) => {
+  if (!MUTATING_METHODS.has(req.method)) return next();
+  const origin = req.headers.origin;
+  if (!origin) return next();
+  if (isAllowedOrigin(origin, req)) return next();
+  return res.status(403).json({ error: "cross_origin_forbidden" });
+});
+
 app.use(express.json({ limit: "100kb" })); // dashboard payloads are small; caps request-body DoS
 app.use(cookieParser());
 
@@ -109,8 +141,11 @@ const wrap = (fn) => async (req, res) => {
 function sanitizeError(message) {
   if (!message) return "Внутренняя ошибка сервера";
   return String(message)
-    .replace(/\/[^\s"']*\.(js|ts):\d+/g, "[internal]")
-    .slice(0, 500);
+    .replace(/\/[^\s"']*\.(js|ts):\d+/g, "[internal]")     // stack file paths
+    .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g, "[адрес]") // IPv4 (recon leak)
+    .replace(/\b(?:[0-9a-f]{1,4}:){3,}[0-9a-f]{0,4}\b/gi, "[адрес]") // IPv6
+    .replace(/(?:[a-z0-9-]+\.)+(?:local|internal|lan|corp)\b/gi, "[хост]") // internal hostnames
+    .slice(0, 300);
 }
 
 function setSessionCookie(res, sid) {
