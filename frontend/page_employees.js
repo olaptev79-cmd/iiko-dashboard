@@ -167,10 +167,12 @@ async function loadHeatmap() {
     if (!d.available) { el.innerHTML = '<div class="unavailable-box">Недоступно: ' + esc(d.error || 'нет данных') + '</div>'; return; }
     if (!d.cashiers.length) { el.innerHTML = '<div class="empty-box">Нет данных за период</div>'; return; }
     const hoursHeader = Array.from({ length: 24 }, (_, h) => `<th class="hm-h">${h}</th>`).join('');
+    // Цвет ячеек следует акценту текущей темы (см. --accent-rgb в shared.css)
+    const accentRgb = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '143,160,255';
     const rows = d.cashiers.map((c) => {
       const cells = c.hours.map((v, h) => {
         const op = v > 0 ? (0.12 + 0.88 * v / d.maxCell).toFixed(2) : 0;
-        return `<td class="hm-cell" style="background:rgba(224,147,46,${op});" title="${esc(c.name)} · ${h}:00 · ${fmt(v)} ₽"></td>`;
+        return `<td class="hm-cell" style="background:rgba(${accentRgb},${op});" title="${esc(c.name)} · ${h}:00 · ${fmt(v)} ₽"></td>`;
       }).join('');
       return `<tr><td class="hm-name">${esc(c.name)}</td>${cells}</tr>`;
     }).join('');

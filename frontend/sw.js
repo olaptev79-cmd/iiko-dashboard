@@ -2,7 +2,7 @@
 // Strategy: stale-while-revalidate for same-origin static GETs so the app
 // shell opens instantly and works offline. API calls and cross-origin
 // requests are deliberately never cached (auth-sensitive / dynamic).
-const CACHE = 'aqba-v1';
+const CACHE = 'aqba-v2'; // v2: редизайн «аврора» — сбрасывает кэш старой темы
 const CORE = [
   'index.html',
   'shared.js',

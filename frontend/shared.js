@@ -145,15 +145,15 @@ function chartTheme() {
   const cs = getComputedStyle(document.documentElement);
   const v = (name) => cs.getPropertyValue(name).trim();
   return {
-    text: v('--muted') || '#9c9585',
-    grid: v('--border') || '#3a352c',
-    legend: v('--text') || '#ede8dd',
-    accent: v('--accent') || '#e0932e',
-    risk: v('--risk') || '#e2683f',
-    // Categorical series palette derived from the "касса/чек" design system —
-    // amber/terracotta family first, then supporting neutrals, so charts
-    // read as part of the same visual language on every page/theme.
-    series: [v('--accent') || '#e0932e', v('--risk') || '#e2683f', '#4f8a8f', '#8a6d3b', '#6f8f4a', '#b3452e', '#a48a5a', '#5c6b5d'],
+    text: v('--muted') || '#8b93b0',
+    grid: v('--border') || 'rgba(148,163,214,0.14)',
+    legend: v('--text') || '#e8ecf8',
+    accent: v('--accent') || '#8fa0ff',
+    risk: v('--risk') || '#e4718e',
+    // Categorical series palette derived from the "аврора" design system —
+    // calm cool hues (indigo/teal/violet family) so charts read as part of
+    // the same visual language on every page/theme.
+    series: [v('--accent') || '#8fa0ff', v('--accent-2') || '#5fd4c4', '#b18cff', '#6eb7ff', v('--risk') || '#e4718e', '#5fd4a0', '#e8c468', '#7c87ad'],
   };
 }
 // Re-render every registered Chart.js instance so colors follow a theme
